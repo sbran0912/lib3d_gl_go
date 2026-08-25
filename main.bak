@@ -1,0 +1,214 @@
+package main
+
+import (
+	"math"
+	"runtime"
+
+	"github.com/go-gl/glfw/v3.3/glfw"
+)
+
+type Vehicle struct {
+	Body    Body
+	Vel     Vec3
+	Accel   Vec3
+	Heading Vec3
+	Health  float32
+	DNA     [4]float32
+}
+
+func vehicleCreate(body Body) Vehicle {
+	return Vehicle{
+		Body:    body,
+		Vel:     vec3(0, 0, 0),
+		Accel:   vec3(0, 0, 0),
+		Heading: vec3(0, 0, 0),
+		Health:  1,
+		DNA: [4]float32{
+			randomFloat(-1.0, 1.0),
+			randomFloat(-1.0, 1.0),
+			randomFloat(20.0, 60.0),
+			randomFloat(20.0, 60.0),
+		},
+	}
+}
+
+func vehicleAlignToVelocity(v *Vehicle) {
+	vel := v.Vel
+
+	mag := float32(math.Sqrt(float64(vel.X*vel.X + vel.Y*vel.Y + vel.Z*vel.Z)))
+	if mag < 0.0001 {
+		return
+	}
+
+	magXZ := float32(math.Sqrt(float64(vel.X*vel.X + vel.Z*vel.Z)))
+
+	v.Body.RotX = float32(math.Acos(float64(vel.Y / mag)))
+	if magXZ < 0.0001 {
+		v.Body.RotY = 0
+	} else {
+		v.Body.RotY = float32(math.Atan2(float64(vel.X/magXZ), float64(vel.Z/magXZ)))
+	}
+	v.Body.RotZ = 0
+
+	v.Heading = vec3(vel.X/mag, vel.Y/mag, vel.Z/mag)
+}
+
+func vehicleApplyForce(v *Vehicle, force Vec3) {
+	v.Accel = vec3Add(v.Accel, force)
+}
+
+func vehicleUpdate(v *Vehicle) {
+	v.Vel = vec3Add(v.Vel, v.Accel)
+	speed := vec3Length(v.Vel)
+	v.Vel = vec3Scale(vec3Normalize(v.Vel), constrainNum(speed, 0.5, 2.0))
+
+	v.Accel = vec3(0, 0, 0)
+	v.Body.Pos = vec3Add(v.Body.Pos, v.Vel)
+}
+
+func vehicleSeek(v *Vehicle, target Vec3, isBadFood bool) {
+	desired := vec3Limit(vec3Sub(target, v.Body.Pos), 3.0)
+	if isBadFood {
+		desired = vec3Scale(desired, v.DNA[0])
+	} else {
+		desired = vec3Scale(desired, v.DNA[1])
+	}
+
+	steer := vec3Limit(vec3Sub(desired, v.Vel), 2.0)
+	vehicleApplyForce(v, vec3Scale(steer, 0.2))
+}
+
+func foodCreate(count int, color string) []Body {
+	food := make([]Body, 0, count)
+	singleFoodMesh := solidSphere(3, 8, 8)
+	for i := 0; i < count; i++ {
+		singleFood := bodyCreate(singleFoodMesh, float32(random(-100, 100)), float32(random(-100, 100)), float32(random(-100, 100)), BodyConfig{Color: color, LineWidth: 1.0})
+		food = append(food, singleFood)
+	}
+	return food
+}
+
+func vehicleEatFood(v *Vehicle, food []Body, isBadFood bool) []Body {
+	mindist := float32(math.Inf(1))
+	idx := -1
+
+	for i := range food {
+		filter := v.DNA[3]
+		if isBadFood {
+			filter = v.DNA[2]
+		}
+		distance := vec3Distance(v.Body.Pos, food[i].Pos)
+		if distance < filter && distance < mindist {
+			mindist = distance
+			idx = i
+		}
+	}
+
+	if idx > -1 {
+		if vec3Distance(v.Body.Pos, food[idx].Pos) < 3 {
+			food = append(food[:idx], food[idx+1:]...)
+			if isBadFood {
+				v.Health -= 0.1
+			} else {
+				v.Health += 0.1
+			}
+		} else {
+			vehicleSeek(v, food[idx].Pos, isBadFood)
+		}
+	}
+	return food
+}
+
+func vehicleBoundary(v *Vehicle) {
+	const (
+		minX = -130.0
+		maxX = 130.0
+		minY = -130.0
+		maxY = 130.0
+		minZ = -130.0
+		maxZ = 130.0
+	)
+
+	if v.Body.Pos.X < minX || v.Body.Pos.X > maxX {
+		v.Vel.X *= -1
+	}
+
+	if v.Body.Pos.Y < minY || v.Body.Pos.Y > maxY {
+		v.Vel.Y *= -1
+	}
+
+	if v.Body.Pos.Z < minZ || v.Body.Pos.Z > maxZ {
+		v.Vel.Z *= -1
+	}
+}
+
+func main() {
+	runtime.LockOSThread()
+	if !renderInit(1600, 1000) {
+		return
+	}
+	camPos := vec3(50, 100, 200)
+	target := vec3(0, 0, 0)
+	up := vec3(0, 1, 0)
+	renderSetFog(100.0, 400.0, 0.25, 0.25, 0.25, 1.0)
+
+	randomInit()
+
+	gridMesh := solidGrid(600, 24)
+	grid := bodyCreate(gridMesh, 0, 0, 0, BodyConfig{Color: "#777774", LineWidth: 1.0})
+
+	poison := foodCreate(30, "#FF0000")
+	food := foodCreate(30, "#44ff44")
+
+	vehicMesh := solidPyramid(2, 6)
+	var vehicles []Vehicle
+
+	for i := 0; i < 10; i++ {
+		vehic := vehicleCreate(bodyCreate(vehicMesh, 0, 20, 100, bodyConfigDefault))
+		vehic.Vel = vec3(randomFloat(-2, 2), randomFloat(-2, 2), randomFloat(-2, 2))
+		vehicles = append(vehicles, vehic)
+	}
+
+	for !renderShouldClose() {
+		renderFrameBegin()
+		renderBackground(40, 40, 40)
+
+		view := mat4x4Lookat(camPos, target, up)
+		proj := mat4x4Perspective(1.2, renderGetAspect(), 0.1, 1000.0)
+		renderSetProjection(&proj)
+
+		bodyDraw(&grid, &view)
+
+		for i := range vehicles {
+			vehicleBoundary(&vehicles[i])
+			food = vehicleEatFood(&vehicles[i], food, false)
+			poison = vehicleEatFood(&vehicles[i], poison, true)
+			vehicleAlignToVelocity(&vehicles[i])
+			vehicleUpdate(&vehicles[i])
+			bodyDraw(&vehicles[i].Body, &view)
+		}
+
+		for i := range poison {
+			bodyDraw(&poison[i], &view)
+		}
+
+		for i := range food {
+			bodyDraw(&food[i], &view)
+		}
+
+		renderFrameEnd()
+	}
+
+	bodyDestroy(&grid)
+	for i := range poison {
+		bodyDestroy(&poison[i])
+	}
+	for i := range food {
+		bodyDestroy(&food[i])
+	}
+	for i := range vehicles {
+		bodyDestroy(&vehicles[i].Body)
+	}
+
+	glfw.Terminate()
+}
