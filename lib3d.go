@@ -64,43 +64,43 @@ func vec3(x, y, z float32) Vec3 {
 	return Vec3{x, y, z}
 }
 
-func vec3Add(a, b Vec3) Vec3 {
+func (a Vec3) Add(b Vec3) Vec3 {
 	return vec3(a.X+b.X, a.Y+b.Y, a.Z+b.Z)
 }
 
-func vec3Sub(a, b Vec3) Vec3 {
+func (a Vec3) Sub(b Vec3) Vec3 {
 	return vec3(a.X-b.X, a.Y-b.Y, a.Z-b.Z)
 }
 
-func vec3Scale(a Vec3, s float32) Vec3 {
+func (a Vec3) Scale(s float32) Vec3 {
 	return vec3(a.X*s, a.Y*s, a.Z*s)
 }
 
-func vec3Mag(a Vec3, m float32) Vec3 {
-	l := vec3Length(a)
+func (a Vec3) SetMagnitude(m float32) Vec3 {
+	l := a.Length()
 	if l == 0 {
 		return vec3(0, 0, 0)
 	}
-	return vec3Scale(a, m/l)
+	return a.Scale(m / l)
 }
 
-func vec3Limit(a Vec3, max float32) Vec3 {
-	mSq := vec3SquaredLength(a)
+func (a Vec3) Limit(max float32) Vec3 {
+	mSq := a.SquaredLength()
 	if mSq > max*max {
-		return vec3Scale(a, max/float32(math.Sqrt(float64(mSq))))
+		return a.Scale(max / float32(math.Sqrt(float64(mSq))))
 	}
 	return a
 }
 
-func vec3Negate(a Vec3) Vec3 {
+func (a Vec3) Negate() Vec3 {
 	return vec3(-a.X, -a.Y, -a.Z)
 }
 
-func vec3Dot(a, b Vec3) float32 {
+func (a Vec3) Dot(b Vec3) float32 {
 	return a.X*b.X + a.Y*b.Y + a.Z*b.Z
 }
 
-func vec3Cross(a, b Vec3) Vec3 {
+func (a Vec3) Cross(b Vec3) Vec3 {
 	return vec3(
 		a.Y*b.Z-a.Z*b.Y,
 		a.Z*b.X-a.X*b.Z,
@@ -108,41 +108,41 @@ func vec3Cross(a, b Vec3) Vec3 {
 	)
 }
 
-func vec3SquaredLength(a Vec3) float32 {
+func (a Vec3) SquaredLength() float32 {
 	return a.X*a.X + a.Y*a.Y + a.Z*a.Z
 }
 
-func vec3Length(a Vec3) float32 {
-	return float32(math.Sqrt(float64(vec3SquaredLength(a))))
+func (a Vec3) Length() float32 {
+	return float32(math.Sqrt(float64(a.SquaredLength())))
 }
 
-func vec3Distance(a, b Vec3) float32 {
-	return vec3Length(vec3Sub(a, b))
+func (a Vec3) Distance(b Vec3) float32 {
+	return a.Sub(b).Length()
 }
 
-func vec3Normalize(a Vec3) Vec3 {
-	l := vec3Length(a)
+func (a Vec3) Normalize() Vec3 {
+	l := a.Length()
 	if l == 0 {
 		return vec3(0, 0, 0)
 	}
-	return vec3Scale(a, 1/l)
+	return a.Scale(1 / l)
 }
 
-func vec3Lerp(a, b Vec3, t float32) Vec3 {
-	return vec3Add(a, vec3Scale(vec3Sub(b, a), t))
+func (a Vec3) Lerp(b Vec3, t float32) Vec3 {
+	return a.Add(b.Sub(a).Scale(t))
 }
 
-func vec3Clone(a Vec3) Vec3 {
+func (a Vec3) Clone() Vec3 {
 	return a
 }
 
-func vec3Equals(a, b Vec3) bool {
+func (a Vec3) Equals(b Vec3) bool {
 	return math.Abs(float64(a.X-b.X)) < epsilon &&
 		math.Abs(float64(a.Y-b.Y)) < epsilon &&
 		math.Abs(float64(a.Z-b.Z)) < epsilon
 }
 
-func vec3Transform(v Vec3, m *Mat4x4) Vec3 {
+func (v Vec3) Transform(m *Mat4x4) Vec3 {
 	return vec3(
 		m.M[0]*v.X+m.M[4]*v.Y+m.M[8]*v.Z+m.M[12],
 		m.M[1]*v.X+m.M[5]*v.Y+m.M[9]*v.Z+m.M[13],
@@ -190,11 +190,11 @@ func mat4x4Rotate(ax, ay, az float32) Mat4x4 {
 		0, 0, 0, 1,
 	}}
 
-	ryRx := mat4x4Mult(&rz, &ry)
-	return mat4x4Mult(&ryRx, &rx)
+	ryRx := rz.Mult(&ry)
+	return ryRx.Mult(&rx)
 }
 
-func mat4x4Mult(a, b *Mat4x4) Mat4x4 {
+func (a *Mat4x4) Mult(b *Mat4x4) Mat4x4 {
 	var r Mat4x4
 	for i := 0; i < 4; i++ {
 		for j := 0; j < 4; j++ {
@@ -207,17 +207,17 @@ func mat4x4Mult(a, b *Mat4x4) Mat4x4 {
 }
 
 func mat4x4Lookat(cameraPos, target, up Vec3) Mat4x4 {
-	forward := vec3Normalize(vec3Sub(target, cameraPos))
-	right := vec3Normalize(vec3Cross(forward, up))
-	realUp := vec3Cross(right, forward)
+	forward := target.Sub(cameraPos).Normalize()
+	right := forward.Cross(up).Normalize()
+	realUp := right.Cross(forward)
 
 	return Mat4x4{[16]float32{
 		right.X, realUp.X, -forward.X, 0,
 		right.Y, realUp.Y, -forward.Y, 0,
 		right.Z, realUp.Z, -forward.Z, 0,
-		-vec3Dot(right, cameraPos),
-		-vec3Dot(realUp, cameraPos),
-		vec3Dot(forward, cameraPos),
+		-right.Dot(cameraPos),
+		-realUp.Dot(cameraPos),
+		forward.Dot(cameraPos),
 		1,
 	}}
 }
@@ -232,18 +232,18 @@ func mat4x4Perspective(fovY, aspect, znear, zfar float32) Mat4x4 {
 	}}
 }
 
-func worldToCamera(point Vec3, view, world *Mat4x4) Vec3 {
-	vw := mat4x4Mult(view, world)
-	return vec3Transform(point, &vw)
+func (point Vec3) ToCamera(view, world *Mat4x4) Vec3 {
+	vw := view.Mult(world)
+	return point.Transform(&vw)
 }
 
-func rotateAround(point, pivot Vec3, rotation *Mat4x4) Vec3 {
-	rel := vec3Sub(point, pivot)
-	rotated := vec3Transform(rel, rotation)
-	return vec3Add(rotated, pivot)
+func (point Vec3) RotateAround(pivot Vec3, rotation *Mat4x4) Vec3 {
+	rel := point.Sub(pivot)
+	rotated := rel.Transform(rotation)
+	return rotated.Add(pivot)
 }
 
-func project(fov float32, v Vec3) Vec2 {
+func (v Vec3) Project(fov float32) Vec2 {
 	s := fov / (fov + v.Z)
 	return Vec2{v.X * s, v.Y * s, s}
 }
@@ -253,10 +253,10 @@ func planeCreate(normal Vec3, distance float32) Plane {
 }
 
 func planeFromFace(faceVerts []Vec3) Plane {
-	edge1 := vec3Sub(faceVerts[1], faceVerts[0])
-	edge2 := vec3Sub(faceVerts[2], faceVerts[0])
-	normal := vec3Normalize(vec3Cross(edge1, edge2))
-	distance := -vec3Dot(normal, faceVerts[0])
+	edge1 := faceVerts[1].Sub(faceVerts[0])
+	edge2 := faceVerts[2].Sub(faceVerts[0])
+	normal := edge1.Cross(edge2).Normalize()
+	distance := -normal.Dot(faceVerts[0])
 
 	boundary := make([]Vec3, len(faceVerts))
 	copy(boundary, faceVerts)
@@ -269,23 +269,23 @@ func planeFromFace(faceVerts []Vec3) Plane {
 	}
 }
 
-func planeIntersectLine(p *Plane, p1, p2 Vec3, out *Vec3) bool {
-	dir := vec3Sub(p2, p1)
-	denom := vec3Dot(p.Normal, dir)
+func (p *Plane) IntersectLine(p1, p2 Vec3, out *Vec3) bool {
+	dir := p2.Sub(p1)
+	denom := p.Normal.Dot(dir)
 
 	if math.Abs(float64(denom)) < 1e-10 {
 		return false
 	}
 
-	t := -(vec3Dot(p.Normal, p1) + p.Distance) / denom
+	t := -(p.Normal.Dot(p1) + p.Distance) / denom
 
 	if t < 0 || t > 1 {
 		return false
 	}
 
-	hit := vec3Add(p1, vec3Scale(dir, t))
+	hit := p1.Add(dir.Scale(t))
 
-	if p.Boundary != nil && !isPointInConvexPolygon(hit, p.Boundary, p.Normal) {
+	if p.Boundary != nil && !p.ContainsPoint(hit) {
 		return false
 	}
 
@@ -293,45 +293,18 @@ func planeIntersectLine(p *Plane, p1, p2 Vec3, out *Vec3) bool {
 	return true
 }
 
-func isPointInConvexPolygon(p Vec3, polygon []Vec3, normal Vec3) bool {
-	for i := 0; i < len(polygon); i++ {
-		a := polygon[i]
-		b := polygon[(i+1)%len(polygon)]
-		edge := vec3Sub(b, a)
-		toPoint := vec3Sub(p, a)
-		if vec3Dot(vec3Cross(edge, toPoint), normal) < 0 {
+func (p *Plane) ContainsPoint(pnt Vec3) bool {
+	for i := 0; i < len(p.Boundary); i++ {
+		a := p.Boundary[i]
+		b := p.Boundary[(i+1)%len(p.Boundary)]
+		edge := b.Sub(a)
+		toPoint := pnt.Sub(a)
+		if edge.Cross(toPoint).Dot(p.Normal) < 0 {
 			return false
 		}
 	}
 	return true
 }
-
-var (
-	window    *glfw.Window
-	gMonitor  *glfw.Monitor
-	program   uint32
-	screenW   float32
-	screenH   float32
-	startTime float64
-
-	gMouseX      float32
-	gMouseY      float32
-	gMouseStatus int
-
-	locPos        int32
-	locModelView  int32
-	locProjection int32
-	locPointSize  int32
-	locMode       int32
-	locColor      int32
-	locColor2     int32
-	locTime       int32
-	locCenter     int32
-	locRadius     int32
-	locFogNear    int32
-	locFogFar     int32
-	locFogColor   int32
-)
 
 type colorState struct {
 	R, G, B, A float32
@@ -347,11 +320,39 @@ type drawState struct {
 
 const maxStack = 64
 
-var (
+// Renderer kapselt den gesamten OpenGL-/Fensterzustand.
+type Renderer struct {
+	window    *glfw.Window
+	monitor   *glfw.Monitor
+	program   uint32
+	screenW   float32
+	screenH   float32
+	startTime float64
+
+	mouseX      float32
+	mouseY      float32
+	mouseStatus int
+
+	locPos        int32
+	locModelView  int32
+	locProjection int32
+	locPointSize  int32
+	locMode       int32
+	locColor      int32
+	locColor2     int32
+	locTime       int32
+	locCenter     int32
+	locRadius     int32
+	locFogNear    int32
+	locFogFar     int32
+	locFogColor   int32
+
 	stateStack    [maxStack]drawState
-	stateStackTop = -1
+	stateStackTop int
 	state         drawState
-)
+}
+
+var renderer = &Renderer{}
 
 func parseColorHex(hex string) colorState {
 	c := colorState{1, 1, 1, 1}
@@ -394,7 +395,7 @@ func parseColorRGBA(r, g, b, a float32) colorState {
 	return colorState{r / 255, g / 255, b / 255, a / 255}
 }
 
-func compileShader(shaderType uint32, src string) uint32 {
+func (r *Renderer) compileShader(shaderType uint32, src string) uint32 {
 	shader := gl.CreateShader(shaderType)
 	csources, free := gl.Strs(src + "\x00")
 	gl.ShaderSource(shader, 1, csources, nil)
@@ -412,10 +413,10 @@ func compileShader(shaderType uint32, src string) uint32 {
 	return shader
 }
 
-func createProgram(vertSrc, fragSrc string) uint32 {
+func (r *Renderer) createProgram(vertSrc, fragSrc string) uint32 {
 	prog := gl.CreateProgram()
-	vs := compileShader(gl.VERTEX_SHADER, vertSrc)
-	fs := compileShader(gl.FRAGMENT_SHADER, fragSrc)
+	vs := r.compileShader(gl.VERTEX_SHADER, vertSrc)
+	fs := r.compileShader(gl.FRAGMENT_SHADER, fragSrc)
 	gl.AttachShader(prog, vs)
 	gl.AttachShader(prog, fs)
 	gl.LinkProgram(prog)
@@ -434,33 +435,33 @@ func createProgram(vertSrc, fragSrc string) uint32 {
 	return prog
 }
 
-func flattenMatrix(src *Mat4x4) [16]float32 {
+func (m *Mat4x4) Flatten() [16]float32 {
 	var dst [16]float32
 	for i := 0; i < 16; i++ {
-		dst[i] = src.M[i]
+		dst[i] = m.M[i]
 	}
 	return dst
 }
 
-func applyUniforms(useStroke bool) {
-	col := state.Fill
+func (r *Renderer) applyUniforms(useStroke bool) {
+	col := r.state.Fill
 	if useStroke {
-		col = state.Stroke
+		col = r.state.Stroke
 	}
-	mode := int32(state.Effect)
+	mode := int32(r.state.Effect)
 
-	gl.Uniform1i(locMode, mode)
-	gl.Uniform4f(locColor, col.R, col.G, col.B, col.A)
-	gl.Uniform4f(locColor2, state.Grad2.R, state.Grad2.G, state.Grad2.B, state.Grad2.A)
+	gl.Uniform1i(r.locMode, mode)
+	gl.Uniform4f(r.locColor, col.R, col.G, col.B, col.A)
+	gl.Uniform4f(r.locColor2, r.state.Grad2.R, r.state.Grad2.G, r.state.Grad2.B, r.state.Grad2.A)
 }
 
-func drawVertices3d(verts []float32, mode uint32) {
+func (r *Renderer) drawVertices(verts []float32, mode uint32) {
 	var buf uint32
 	gl.GenBuffers(1, &buf)
 	gl.BindBuffer(gl.ARRAY_BUFFER, buf)
 	gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.DYNAMIC_DRAW)
-	gl.EnableVertexAttribArray(uint32(locPos))
-	gl.VertexAttribPointer(uint32(locPos), 3, gl.FLOAT, false, 0, nil)
+	gl.EnableVertexAttribArray(uint32(r.locPos))
+	gl.VertexAttribPointer(uint32(r.locPos), 3, gl.FLOAT, false, 0, nil)
 	gl.DrawArrays(mode, 0, int32(len(verts)/3))
 	gl.DeleteBuffers(1, &buf)
 }
@@ -488,23 +489,23 @@ func shapeMetrics3d(pts []float32) (cx, cy, cz, r float32) {
 	return
 }
 
-func cursorCallback(w *glfw.Window, xpos, ypos float64) {
-	gMouseX = float32(xpos) - screenW/2
-	gMouseY = -(float32(ypos) - screenH/2)
+func (r *Renderer) cursorCallback(w *glfw.Window, xpos, ypos float64) {
+	r.mouseX = float32(xpos) - r.screenW/2
+	r.mouseY = -(float32(ypos) - r.screenH/2)
 }
 
-func mouseButtonCallback(w *glfw.Window, button glfw.MouseButton, action glfw.Action, mods glfw.ModifierKey) {
+func (r *Renderer) mouseButtonCallback(w *glfw.Window, button glfw.MouseButton, action glfw.Action, mods glfw.ModifierKey) {
 	if button == glfw.MouseButtonLeft {
 		if action == glfw.Press {
-			gMouseStatus = 1
+			r.mouseStatus = 1
 		}
 		if action == glfw.Release {
-			gMouseStatus = 2
+			r.mouseStatus = 2
 		}
 	}
 }
 
-func keyCallback(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
+func (r *Renderer) keyCallback(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
 	if action != glfw.Press {
 		return
 	}
@@ -515,7 +516,7 @@ func keyCallback(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action,
 	// F11: Umschalten in den Fenstermodus deaktiviert
 }
 
-func renderInit(w, h int) bool {
+func (r *Renderer) Init(w, h int) bool {
 	if err := glfw.Init(); err != nil {
 		fmt.Fprintln(os.Stderr, "GLFW-Init fehlgeschlagen.")
 		return false
@@ -525,8 +526,8 @@ func renderInit(w, h int) bool {
 	glfw.WindowHint(glfw.ContextVersionMinor, 3)
 	glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
 
-	gMonitor = glfw.GetPrimaryMonitor()
-	mode := gMonitor.GetVideoMode()
+	r.monitor = glfw.GetPrimaryMonitor()
+	mode := r.monitor.GetVideoMode()
 	if mode == nil {
 		fmt.Fprintln(os.Stderr, "Video-Modus nicht verfügbar.")
 		glfw.Terminate()
@@ -534,25 +535,25 @@ func renderInit(w, h int) bool {
 	}
 
 	var err error
-	window, err = glfw.CreateWindow(mode.Width, mode.Height, "lib3d_opengl_go", gMonitor, nil)
+	r.window, err = glfw.CreateWindow(mode.Width, mode.Height, "lib3d_opengl_go", r.monitor, nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Fenster-Erstellung fehlgeschlagen.")
 		glfw.Terminate()
 		return false
 	}
 
-	window.MakeContextCurrent()
+	r.window.MakeContextCurrent()
 	if err := gl.Init(); err != nil {
 		fmt.Fprintln(os.Stderr, "GL-Init fehlgeschlagen.")
 		return false
 	}
-	window.SetCursorPosCallback(cursorCallback)
-	window.SetMouseButtonCallback(mouseButtonCallback)
-	window.SetKeyCallback(keyCallback)
+	r.window.SetCursorPosCallback(r.cursorCallback)
+	r.window.SetMouseButtonCallback(r.mouseButtonCallback)
+	r.window.SetKeyCallback(r.keyCallback)
 
-	fbW, fbH := window.GetFramebufferSize()
-	screenW = float32(fbW)
-	screenH = float32(fbH)
+	fbW, fbH := r.window.GetFramebufferSize()
+	r.screenW = float32(fbW)
+	r.screenH = float32(fbH)
 	w = fbW
 	h = fbH
 
@@ -567,30 +568,30 @@ func renderInit(w, h int) bool {
 		return false
 	}
 
-	program = createProgram(string(vertSrc), string(fragSrc))
-	gl.UseProgram(program)
+	r.program = r.createProgram(string(vertSrc), string(fragSrc))
+	gl.UseProgram(r.program)
 
-	locPos = gl.GetAttribLocation(program, gl.Str("aPos\x00"))
-	locModelView = gl.GetUniformLocation(program, gl.Str("uModelView\x00"))
-	locProjection = gl.GetUniformLocation(program, gl.Str("uProjection\x00"))
-	locPointSize = gl.GetUniformLocation(program, gl.Str("uPointSize\x00"))
-	locMode = gl.GetUniformLocation(program, gl.Str("uMode\x00"))
-	locColor = gl.GetUniformLocation(program, gl.Str("uColor\x00"))
-	locColor2 = gl.GetUniformLocation(program, gl.Str("uColor2\x00"))
-	locTime = gl.GetUniformLocation(program, gl.Str("uTime\x00"))
-	locCenter = gl.GetUniformLocation(program, gl.Str("uShapeCenter\x00"))
-	locRadius = gl.GetUniformLocation(program, gl.Str("uShapeRadius\x00"))
-	locFogNear = gl.GetUniformLocation(program, gl.Str("uFogNear\x00"))
-	locFogFar = gl.GetUniformLocation(program, gl.Str("uFogFar\x00"))
-	locFogColor = gl.GetUniformLocation(program, gl.Str("uFogColor\x00"))
+	r.locPos = gl.GetAttribLocation(r.program, gl.Str("aPos\x00"))
+	r.locModelView = gl.GetUniformLocation(r.program, gl.Str("uModelView\x00"))
+	r.locProjection = gl.GetUniformLocation(r.program, gl.Str("uProjection\x00"))
+	r.locPointSize = gl.GetUniformLocation(r.program, gl.Str("uPointSize\x00"))
+	r.locMode = gl.GetUniformLocation(r.program, gl.Str("uMode\x00"))
+	r.locColor = gl.GetUniformLocation(r.program, gl.Str("uColor\x00"))
+	r.locColor2 = gl.GetUniformLocation(r.program, gl.Str("uColor2\x00"))
+	r.locTime = gl.GetUniformLocation(r.program, gl.Str("uTime\x00"))
+	r.locCenter = gl.GetUniformLocation(r.program, gl.Str("uShapeCenter\x00"))
+	r.locRadius = gl.GetUniformLocation(r.program, gl.Str("uShapeRadius\x00"))
+	r.locFogNear = gl.GetUniformLocation(r.program, gl.Str("uFogNear\x00"))
+	r.locFogFar = gl.GetUniformLocation(r.program, gl.Str("uFogFar\x00"))
+	r.locFogColor = gl.GetUniformLocation(r.program, gl.Str("uFogColor\x00"))
 
-	gl.Uniform1f(locPointSize, 4.0)
-	gl.Uniform3f(locCenter, 0, 0, 0)
-	gl.Uniform1f(locRadius, 1)
+	gl.Uniform1f(r.locPointSize, 4.0)
+	gl.Uniform3f(r.locCenter, 0, 0, 0)
+	gl.Uniform1f(r.locRadius, 1)
 
 	identity := [16]float32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
-	gl.UniformMatrix4fv(locProjection, 1, false, &identity[0])
-	gl.UniformMatrix4fv(locModelView, 1, false, &identity[0])
+	gl.UniformMatrix4fv(r.locProjection, 1, false, &identity[0])
+	gl.UniformMatrix4fv(r.locModelView, 1, false, &identity[0])
 
 	var vao uint32
 	gl.GenVertexArrays(1, &vao)
@@ -602,158 +603,165 @@ func renderInit(w, h int) bool {
 	gl.Enable(gl.PROGRAM_POINT_SIZE)
 
 	gl.Viewport(0, 0, int32(w), int32(h))
-	startTime = glfw.GetTime()
+	r.startTime = glfw.GetTime()
+	r.stateStackTop = -1
 
-	state.Fill = colorState{1, 1, 1, 1}
-	state.Stroke = colorState{0, 0, 0, 1}
-	state.LineW = 1
-	state.Effect = EffectFlat
-	state.Grad2 = colorState{0, 0, 0, 1}
+	r.state.Fill = colorState{1, 1, 1, 1}
+	r.state.Stroke = colorState{0, 0, 0, 1}
+	r.state.LineW = 1
+	r.state.Effect = EffectFlat
+	r.state.Grad2 = colorState{0, 0, 0, 1}
 
 	return true
 }
 
-func renderShouldClose() bool {
-	return window.ShouldClose()
+func (r *Renderer) ShouldClose() bool {
+	return r.window.ShouldClose()
 }
 
-func renderFrameBegin() {
-	t := glfw.GetTime() - startTime
-	gl.Uniform1f(locTime, float32(t))
+func (r *Renderer) BeginFrame() {
+	t := glfw.GetTime() - r.startTime
+	gl.Uniform1f(r.locTime, float32(t))
 }
 
-func renderFrameEnd() {
-	window.SwapBuffers()
+func (r *Renderer) EndFrame() {
+	r.window.SwapBuffers()
 	glfw.PollEvents()
 }
 
-func renderSetFog(near, far, r, g, b, a float32) {
-	gl.Uniform1f(locFogNear, near)
-	gl.Uniform1f(locFogFar, far)
-	gl.Uniform4f(locFogColor, r, g, b, a)
+func (r *Renderer) SetFog(near, far, red, green, blue, alpha float32) {
+	gl.Uniform1f(r.locFogNear, near)
+	gl.Uniform1f(r.locFogFar, far)
+	gl.Uniform4f(r.locFogColor, red, green, blue, alpha)
 }
 
-func renderGetWidth() int      { return int(screenW) }
-func renderGetHeight() int     { return int(screenH) }
-func renderGetAspect() float32 { return screenW / screenH }
-func renderMouseX() float32    { return gMouseX }
-func renderMouseY() float32    { return gMouseY }
-func renderGetTime() float32   { return float32(glfw.GetTime() - startTime) }
+func (r *Renderer) Width() int      { return int(r.screenW) }
+func (r *Renderer) Height() int     { return int(r.screenH) }
+func (r *Renderer) Aspect() float32 { return r.screenW / r.screenH }
+func (r *Renderer) MouseX() float32 { return r.mouseX }
+func (r *Renderer) MouseY() float32 { return r.mouseY }
+func (r *Renderer) Time() float32   { return float32(glfw.GetTime() - r.startTime) }
 
-func renderIsMouseDown() bool { return gMouseStatus == 1 }
+func (r *Renderer) IsMouseDown() bool { return r.mouseStatus == 1 }
 
-func renderIsMouseUp() bool {
-	if gMouseStatus == 2 {
-		gMouseStatus = 0
+func (r *Renderer) IsMouseUp() bool {
+	if r.mouseStatus == 2 {
+		r.mouseStatus = 0
 		return true
 	}
 	return false
 }
 
-func renderSetProjection(m *Mat4x4) {
-	fm := flattenMatrix(m)
-	gl.UniformMatrix4fv(locProjection, 1, false, &fm[0])
+func (r *Renderer) SetProjection(m *Mat4x4) {
+	fm := m.Flatten()
+	gl.UniformMatrix4fv(r.locProjection, 1, false, &fm[0])
 }
 
-func renderSetModelview(m *Mat4x4) {
-	fm := flattenMatrix(m)
-	gl.UniformMatrix4fv(locModelView, 1, false, &fm[0])
+func (r *Renderer) SetModelview(m *Mat4x4) {
+	fm := m.Flatten()
+	gl.UniformMatrix4fv(r.locModelView, 1, false, &fm[0])
 }
 
-func renderSetGradientCenter(cx, cy, cz, radius float32) {
-	gl.Uniform3f(locCenter, cx, cy, cz)
-	gl.Uniform1f(locRadius, radius)
+func (r *Renderer) SetGradientCenter(cx, cy, cz, radius float32) {
+	gl.Uniform3f(r.locCenter, cx, cy, cz)
+	gl.Uniform1f(r.locRadius, radius)
 }
 
-func renderPush() {
-	if stateStackTop < maxStack-1 {
-		stateStackTop++
-		stateStack[stateStackTop] = state
+func (r *Renderer) Push() {
+	if r.stateStackTop < maxStack-1 {
+		r.stateStackTop++
+		r.stateStack[r.stateStackTop] = r.state
 	}
 }
 
-func renderPop() {
-	if stateStackTop >= 0 {
-		state = stateStack[stateStackTop]
-		stateStackTop--
+func (r *Renderer) Pop() {
+	if r.stateStackTop >= 0 {
+		r.state = r.stateStack[r.stateStackTop]
+		r.stateStackTop--
 	}
 }
 
-func renderFillColor(r, g, b, a float32)   { state.Fill = parseColorRGBA(r, g, b, a) }
-func renderFillColorHex(hex string)        { state.Fill = parseColorHex(hex) }
-func renderStrokeColor(r, g, b, a float32) { state.Stroke = parseColorRGBA(r, g, b, a) }
-func renderStrokeColorHex(hex string)      { state.Stroke = parseColorHex(hex) }
-func renderStrokeWidth(w float32)          { state.LineW = w }
-func renderSetEffect(mode EffectMode)      { state.Effect = mode }
-func renderSetGradient(r, g, b, a float32) { state.Grad2 = parseColorRGBA(r, g, b, a) }
-func renderSetGradientHex(hex string)      { state.Grad2 = parseColorHex(hex) }
+func (r *Renderer) SetFillColor(red, green, blue, alpha float32) {
+	r.state.Fill = parseColorRGBA(red, green, blue, alpha)
+}
+func (r *Renderer) SetFillColorHex(hex string) { r.state.Fill = parseColorHex(hex) }
+func (r *Renderer) SetStrokeColor(red, green, blue, alpha float32) {
+	r.state.Stroke = parseColorRGBA(red, green, blue, alpha)
+}
+func (r *Renderer) SetStrokeColorHex(hex string) { r.state.Stroke = parseColorHex(hex) }
+func (r *Renderer) SetStrokeWidth(width float32) { r.state.LineW = width }
+func (r *Renderer) SetEffect(mode EffectMode)    { r.state.Effect = mode }
+func (r *Renderer) SetGradient(red, green, blue, alpha float32) {
+	r.state.Grad2 = parseColorRGBA(red, green, blue, alpha)
+}
+func (r *Renderer) SetGradientHex(hex string) { r.state.Grad2 = parseColorHex(hex) }
 
-func renderBackground(r, g, b float32) {
-	c := parseColorRGB(r, g, b)
+func (r *Renderer) Background(red, green, blue float32) {
+	c := parseColorRGB(red, green, blue)
 	gl.ClearColor(c.R, c.G, c.B, c.A)
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 }
 
-func renderBackgroundHex(hex string) {
+func (r *Renderer) BackgroundHex(hex string) {
 	c := parseColorHex(hex)
 	gl.ClearColor(c.R, c.G, c.B, c.A)
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 }
 
-func renderPointSize(px float32) {
-	gl.Uniform1f(locPointSize, px)
+func (r *Renderer) SetPointSize(px float32) {
+	gl.Uniform1f(r.locPointSize, px)
 }
 
-func renderPoint(x, y, z float32) {
-	applyUniforms(true)
+func (r *Renderer) Point(x, y, z float32) {
+	r.applyUniforms(true)
 	v := []float32{x, y, z}
-	drawVertices3d(v, gl.POINTS)
+	r.drawVertices(v, gl.POINTS)
 }
 
-func renderLine(x1, y1, z1, x2, y2, z2 float32) {
-	applyUniforms(true)
+func (r *Renderer) Line(x1, y1, z1, x2, y2, z2 float32) {
+	r.applyUniforms(true)
 	v := []float32{x1, y1, z1, x2, y2, z2}
-	drawVertices3d(v, gl.LINES)
+	r.drawVertices(v, gl.LINES)
 }
 
-func renderTriangle(x1, y1, z1, x2, y2, z2, x3, y3, z3 float32, style DrawStyle) {
+func (r *Renderer) Triangle(x1, y1, z1, x2, y2, z2, x3, y3, z3 float32, style DrawStyle) {
 	pts := []float32{x1, y1, z1, x2, y2, z2, x3, y3, z3}
 	shapeMetrics3d(pts)
 
 	if style == Fill || style == Both {
-		applyUniforms(false)
-		drawVertices3d(pts, gl.TRIANGLES)
+		r.applyUniforms(false)
+		r.drawVertices(pts, gl.TRIANGLES)
 	}
 	if style == Stroke || style == Both {
-		applyUniforms(true)
+		r.applyUniforms(true)
 		s := []float32{x1, y1, z1, x2, y2, z2, x2, y2, z2, x3, y3, z3, x3, y3, z3, x1, y1, z1}
-		drawVertices3d(s, gl.LINES)
+		r.drawVertices(s, gl.LINES)
 	}
 }
 
-func renderShape(x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4 float32, style DrawStyle) {
+func (r *Renderer) Shape(x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4 float32, style DrawStyle) {
 	pts := []float32{x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4}
 	shapeMetrics3d(pts)
 
 	if style == Fill || style == Both {
-		applyUniforms(false)
+		r.applyUniforms(false)
 		f := []float32{x1, y1, z1, x2, y2, z2, x3, y3, z3, x1, y1, z1, x3, y3, z3, x4, y4, z4}
-		drawVertices3d(f, gl.TRIANGLES)
+		r.drawVertices(f, gl.TRIANGLES)
 	}
 	if style == Stroke || style == Both {
-		applyUniforms(true)
+		r.applyUniforms(true)
 		s := []float32{x1, y1, z1, x2, y2, z2, x2, y2, z2, x3, y3, z3, x3, y3, z3, x4, y4, z4, x4, y4, z4, x1, y1, z1}
-		drawVertices3d(s, gl.LINES)
+		r.drawVertices(s, gl.LINES)
 	}
 }
 
-func renderRect(x, y, w, h float32, style DrawStyle, z float32) {
+func (r *Renderer) Rect(x, y, w, h float32, style DrawStyle, z float32) {
 	hw := w / 2
 	hh := h / 2
-	renderShape(x-hw, y-hh, z, x+hw, y-hh, z, x+hw, y+hh, z, x-hw, y+hh, z, style)
+	r.Shape(x-hw, y-hh, z, x+hw, y-hh, z, x+hw, y+hh, z, x-hw, y+hh, z, style)
 }
 
-func renderCircle(x, y, z, radius float32, style DrawStyle, segments int) {
+func (r *Renderer) Circle(x, y, z, radius float32, style DrawStyle, segments int) {
 	tau := float32(2 * math.Pi)
 
 	if style == Fill || style == Both {
@@ -775,8 +783,8 @@ func renderCircle(x, y, z, radius float32, style DrawStyle, segments int) {
 			fill[fi+2] = z
 			fi += 3
 		}
-		applyUniforms(false)
-		drawVertices3d(fill, gl.TRIANGLES)
+		r.applyUniforms(false)
+		r.drawVertices(fill, gl.TRIANGLES)
 	}
 
 	if style == Stroke || style == Both {
@@ -789,12 +797,12 @@ func renderCircle(x, y, z, radius float32, style DrawStyle, segments int) {
 			stroke[si+2] = z
 			si += 3
 		}
-		applyUniforms(true)
-		drawVertices3d(stroke, gl.LINE_LOOP)
+		r.applyUniforms(true)
+		r.drawVertices(stroke, gl.LINE_LOOP)
 	}
 }
 
-func renderPolygon(pts []float32, style DrawStyle) {
+func (r *Renderer) Polygon(pts []float32, style DrawStyle) {
 	if len(pts) < 4 {
 		return
 	}
@@ -818,16 +826,16 @@ func renderPolygon(pts []float32, style DrawStyle) {
 			fill[fi+2] = pts[i*3+5]
 			fi += 3
 		}
-		applyUniforms(false)
-		drawVertices3d(fill, gl.TRIANGLES)
+		r.applyUniforms(false)
+		r.drawVertices(fill, gl.TRIANGLES)
 	}
 	if style == Stroke || style == Both {
-		applyUniforms(true)
-		drawVertices3d(pts, gl.LINE_LOOP)
+		r.applyUniforms(true)
+		r.drawVertices(pts, gl.LINE_LOOP)
 	}
 }
 
-func renderCreateMesh(flatVerts []float32) uint32 {
+func (r *Renderer) CreateMesh(flatVerts []float32) uint32 {
 	var buf uint32
 	gl.GenBuffers(1, &buf)
 	gl.BindBuffer(gl.ARRAY_BUFFER, buf)
@@ -835,16 +843,16 @@ func renderCreateMesh(flatVerts []float32) uint32 {
 	return buf
 }
 
-func renderDrawMesh(buf uint32, vertCount int) {
-	applyUniforms(true)
-	gl.LineWidth(state.LineW)
+func (r *Renderer) DrawMesh(buf uint32, vertCount int) {
+	r.applyUniforms(true)
+	gl.LineWidth(r.state.LineW)
 	gl.BindBuffer(gl.ARRAY_BUFFER, buf)
-	gl.EnableVertexAttribArray(uint32(locPos))
-	gl.VertexAttribPointer(uint32(locPos), 3, gl.FLOAT, false, 0, nil)
+	gl.EnableVertexAttribArray(uint32(r.locPos))
+	gl.VertexAttribPointer(uint32(r.locPos), 3, gl.FLOAT, false, 0, nil)
 	gl.DrawArrays(gl.LINES, 0, int32(vertCount))
 }
 
-func renderDeleteMesh(buf uint32) {
+func (r *Renderer) DeleteMesh(buf uint32) {
 	gl.DeleteBuffers(1, &buf)
 }
 
@@ -852,7 +860,7 @@ func solidCreate() *Solid {
 	return &Solid{}
 }
 
-func solidInit(s *Solid, vertices []Vec3, edges []int) {
+func (s *Solid) Init(vertices []Vec3, edges []int) {
 	s.Vertices = make([]Vec3, len(vertices))
 	copy(s.Vertices, vertices)
 	s.VertexCount = len(vertices)
@@ -865,7 +873,7 @@ func solidInit(s *Solid, vertices []Vec3, edges []int) {
 	s.MeshVertexCount = 0
 }
 
-func ensureMesh(s *Solid) {
+func (s *Solid) ensureMesh() {
 	if s.MeshBuffer != 0 {
 		return
 	}
@@ -886,28 +894,28 @@ func ensureMesh(s *Solid) {
 		idx += 3
 	}
 
-	s.MeshBuffer = renderCreateMesh(verts)
+	s.MeshBuffer = renderer.CreateMesh(verts)
 	s.MeshVertexCount = s.EdgeCount * 2
 }
 
-func solidDraw(s *Solid, view, world *Mat4x4) {
-	ensureMesh(s)
-	vw := mat4x4Mult(view, world)
-	renderSetModelview(&vw)
-	renderDrawMesh(s.MeshBuffer, s.MeshVertexCount)
+func (s *Solid) Draw(view, world *Mat4x4) {
+	s.ensureMesh()
+	vw := view.Mult(world)
+	renderer.SetModelview(&vw)
+	renderer.DrawMesh(s.MeshBuffer, s.MeshVertexCount)
 }
 
-func solidRetain(s *Solid) {
+func (s *Solid) Retain() {
 	s.RefCount++
 }
 
-func solidRelease(s *Solid) {
+func (s *Solid) Release() {
 	s.RefCount--
 	if s.RefCount > 0 {
 		return
 	}
 	if s.MeshBuffer != 0 {
-		renderDeleteMesh(s.MeshBuffer)
+		renderer.DeleteMesh(s.MeshBuffer)
 	}
 	s.Vertices = nil
 	s.Edges = nil
@@ -941,7 +949,7 @@ func solidBox(w, h, d float32) *Solid {
 	}
 
 	s := solidCreate()
-	solidInit(s, verts, edges)
+	s.Init(verts, edges)
 
 	s.FaceCount = 6
 	s.Faces = make([]int, 24)
@@ -975,7 +983,7 @@ func solidPyramid(base, height float32) *Solid {
 	sizes := []int{3, 3, 3, 3, 4}
 
 	s := solidCreate()
-	solidInit(s, verts, edges)
+	s.Init(verts, edges)
 
 	s.FaceCount = 5
 	s.Faces = make([]int, len(rawFaces))
@@ -1022,7 +1030,7 @@ func solidGrid(size float32, cells int) *Solid {
 	}
 
 	s := solidCreate()
-	solidInit(s, verts, edges[:ei])
+	s.Init(verts, edges[:ei])
 	return s
 }
 
@@ -1067,6 +1075,6 @@ func solidSphere(radius float32, slices, stacks int) *Solid {
 	}
 
 	s := solidCreate()
-	solidInit(s, verts, edges[:ei])
+	s.Init(verts, edges[:ei])
 	return s
 }

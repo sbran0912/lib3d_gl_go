@@ -17,8 +17,8 @@ type Vehicle struct {
 	DNA     [4]float32
 }
 
-// vehicCreate erstellt ein neues Vehicle mit zufälliger DNA.
-func vehicCreate(body Body) Vehicle {
+// NewVehicle erstellt ein neues Vehicle mit zufälliger DNA.
+func NewVehicle(body Body) Vehicle {
 	return Vehicle{
 		Body:    body,
 		Vel:     vec3(0, 0, 0),
@@ -34,13 +34,13 @@ func vehicCreate(body Body) Vehicle {
 	}
 }
 
-// vehicDestroy gibt die Ressourcen des Fahrzeugs frei.
-func vehicDestroy(v *Vehicle) {
-	bodyDestroy(&v.Body)
+// Destroy gibt die Ressourcen des Fahrzeugs frei.
+func (v *Vehicle) Destroy() {
+	v.Body.Destroy()
 }
 
-// vehicAlignToVelocity richtet den Body an der Geschwindigkeit aus.
-func vehicAlignToVelocity(v *Vehicle) {
+// AlignToVelocity richtet den Body an der Geschwindigkeit aus.
+func (v *Vehicle) AlignToVelocity() {
 	vel := v.Vel
 
 	mag := float32(math.Sqrt(float64(vel.X*vel.X + vel.Y*vel.Y + vel.Z*vel.Z)))
@@ -69,39 +69,39 @@ func vehicAlignToVelocity(v *Vehicle) {
 	v.Heading = vec3(vel.X/mag, vel.Y/mag, vel.Z/mag)
 }
 
-// vehicApplyForce addiert eine Kraft zur Beschleunigung.
-func vehicApplyForce(v *Vehicle, force Vec3) {
-	v.Accel = vec3Add(v.Accel, force)
+// ApplyForce addiert eine Kraft zur Beschleunigung.
+func (v *Vehicle) ApplyForce(force Vec3) {
+	v.Accel = v.Accel.Add(force)
 }
 
-// vehicUpdate integriert die Bewegung und begrenzt die Geschwindigkeit.
-func vehicUpdate(v *Vehicle) {
-	v.Vel = vec3Add(v.Vel, v.Accel)
-	speed := vec3Length(v.Vel)
-	v.Vel = vec3Scale(vec3Normalize(v.Vel), constrainNum(speed, 0.5, 2.0))
+// Update integriert die Bewegung und begrenzt die Geschwindigkeit.
+func (v *Vehicle) Update() {
+	v.Vel = v.Vel.Add(v.Accel)
+	speed := v.Vel.Length()
+	v.Vel = v.Vel.Normalize().Scale(constrainNum(speed, 0.5, 2.0))
 
 	v.Accel = vec3(0, 0, 0)
-	v.Body.Pos = vec3Add(v.Body.Pos, v.Vel)
+	v.Body.Pos = v.Body.Pos.Add(v.Vel)
 }
 
-// vehicSeek steuert das Fahrzeug in Richtung eines Ziels.
-func vehicSeek(v *Vehicle, target Vec3, isBadfood bool) {
-	desired := vec3Limit(vec3Sub(target, v.Body.Pos), 3.0)
+// Seek steuert das Fahrzeug in Richtung eines Ziels.
+func (v *Vehicle) Seek(target Vec3, isBadfood bool) {
+	desired := target.Sub(v.Body.Pos).Limit(3.0)
 	if isBadfood {
-		desired = vec3Scale(desired, v.DNA[0])
+		desired = desired.Scale(v.DNA[0])
 	} else {
-		desired = vec3Scale(desired, v.DNA[1])
+		desired = desired.Scale(v.DNA[1])
 	}
 
-	steer := vec3Limit(vec3Sub(desired, v.Vel), 2.0)
-	vehicApplyForce(v, vec3Scale(steer, 0.2))
+	steer := desired.Sub(v.Vel).Limit(2.0)
+	v.ApplyForce(steer.Scale(0.2))
 }
 
 // foodCreate erzeugt count Food-Bodies an zufälligen Positionen.
 func foodCreate(count int, color string, mesh *Solid) []Body {
 	food := make([]Body, 0, count)
 	for range count {
-		singleFood := bodyCreate(mesh,
+		singleFood := NewBody(mesh,
 			float32(random(-100, 100)),
 			float32(random(-100, 100)),
 			float32(random(-100, 100)),
@@ -115,7 +115,7 @@ func foodCreate(count int, color string, mesh *Solid) []Body {
 func foodRespawn(food []Body, mesh *Solid, min, count int, color string) []Body {
 	if len(food) < min {
 		for range count {
-			singleFood := bodyCreate(mesh,
+			singleFood := NewBody(mesh,
 				float32(random(-100, 100)),
 				float32(random(-100, 100)),
 				float32(random(-100, 100)),
@@ -126,9 +126,9 @@ func foodRespawn(food []Body, mesh *Solid, min, count int, color string) []Body 
 	return food
 }
 
-// vehicleEatFood sucht das nächste (gute/schlechte) Food im DNA-Radius
+// EatFood sucht das nächste (gute/schlechte) Food im DNA-Radius
 // und isst es auf, sobald es nahe genug ist.
-func vehicleEatFood(v *Vehicle, food *[]Body, isBadfood bool) {
+func (v *Vehicle) EatFood(food *[]Body, isBadfood bool) {
 	minDist := float32(math.Inf(1))
 	idx := -1
 
@@ -138,7 +138,7 @@ func vehicleEatFood(v *Vehicle, food *[]Body, isBadfood bool) {
 	}
 
 	for i := range *food {
-		d := vec3Distance(v.Body.Pos, (*food)[i].Pos)
+		d := v.Body.Pos.Distance((*food)[i].Pos)
 		if d < filter && d < minDist {
 			minDist = d
 			idx = i
@@ -146,8 +146,8 @@ func vehicleEatFood(v *Vehicle, food *[]Body, isBadfood bool) {
 	}
 
 	if idx > -1 {
-		if vec3Distance(v.Body.Pos, (*food)[idx].Pos) < 3 {
-			bodyDestroy(&(*food)[idx]) // Food aufessen (Refcount freigeben)
+		if v.Body.Pos.Distance((*food)[idx].Pos) < 3 {
+			(*food)[idx].Destroy() // Food aufessen (Refcount freigeben)
 			*food = append((*food)[:idx], (*food)[idx+1:]...)
 			if isBadfood {
 				v.Health -= 0.1
@@ -155,13 +155,13 @@ func vehicleEatFood(v *Vehicle, food *[]Body, isBadfood bool) {
 				v.Health += 0.1
 			}
 		} else {
-			vehicSeek(v, (*food)[idx].Pos, isBadfood)
+			v.Seek((*food)[idx].Pos, isBadfood)
 		}
 	}
 }
 
-// vehicBoundary reflektiert die Geschwindigkeit an den Weltgrenzen.
-func vehicBoundary(v *Vehicle) {
+// ApplyBoundary reflektiert die Geschwindigkeit an den Weltgrenzen.
+func (v *Vehicle) ApplyBoundary() {
 	// Definiere deine Weltgrenzen
 	const (
 		minX = -130.0
@@ -188,26 +188,26 @@ func vehicBoundary(v *Vehicle) {
 	}
 }
 
-// vehicIsDead meldet, ob die Gesundheit des Fahrzeugs erschöpft ist.
-func vehicIsDead(v *Vehicle) bool {
+// IsDead meldet, ob die Gesundheit des Fahrzeugs erschöpft ist.
+func (v *Vehicle) IsDead() bool {
 	return v.Health < 0.0
 }
 
 func main() {
 	runtime.LockOSThread()
 
-	if !renderInit(1600, 1000) {
+	if !renderer.Init(1600, 1000) {
 		return
 	}
 	camPos := vec3(50, 100, 200)
 	target := vec3(0, 0, 0)
 	up := vec3(0, 1, 0)
-	renderSetFog(100.0, 400.0, 0.25, 0.25, 0.25, 1.0)
+	renderer.SetFog(100.0, 400.0, 0.25, 0.25, 0.25, 1.0)
 
 	randomInit()
 
 	gridMesh := solidGrid(600, 24)
-	grid := bodyCreate(gridMesh, 0, 0, 0, BodyConfig{Color: "#777774", LineWidth: 1.0})
+	grid := NewBody(gridMesh, 0, 0, 0, BodyConfig{Color: "#777774", LineWidth: 1.0})
 
 	foodMesh := solidSphere(3, 8, 8)
 	poison := foodCreate(30, "#FF0000", foodMesh)
@@ -217,20 +217,20 @@ func main() {
 	vehics := make([]Vehicle, 0, 10)
 
 	for i := 0; i < 10; i++ {
-		vehic := vehicCreate(bodyCreate(vehicMesh, 0, 20, 100, bodyConfigDefault))
+		vehic := NewVehicle(NewBody(vehicMesh, 0, 20, 100, bodyConfigDefault))
 		vehic.Vel = vec3(randomFloat(-2, 2), randomFloat(-2, 2), randomFloat(-2, 2))
 		vehics = append(vehics, vehic)
 	}
 
-	for !renderShouldClose() {
-		renderFrameBegin()
-		renderBackground(40, 40, 40)
+	for !renderer.ShouldClose() {
+		renderer.BeginFrame()
+		renderer.Background(40, 40, 40)
 
 		view := mat4x4Lookat(camPos, target, up)
-		proj := mat4x4Perspective(1.2, renderGetAspect(), 0.1, 1000.0)
-		renderSetProjection(&proj)
+		proj := mat4x4Perspective(1.2, renderer.Aspect(), 0.1, 1000.0)
+		renderer.SetProjection(&proj)
 
-		bodyDraw(&grid, &view)
+		grid.Draw(&view)
 
 		food = foodRespawn(food, foodMesh, 20, 30, "#44ff44")
 		poison = foodRespawn(poison, foodMesh, 20, 30, "#FF0000")
@@ -240,11 +240,11 @@ func main() {
 		for i := len(vehics) - 1; i >= 0; i-- {
 			v := &vehics[i]
 
-			vehicBoundary(v)
-			vehicleEatFood(v, &food, false)
-			vehicleEatFood(v, &poison, true)
-			vehicAlignToVelocity(v)
-			vehicUpdate(v)
+			v.ApplyBoundary()
+			v.EatFood(&food, false)
+			v.EatFood(&poison, true)
+			v.AlignToVelocity()
+			v.Update()
 
 			if v.Health < 0.5 {
 				v.Body.Color = "#FF0000"
@@ -252,39 +252,39 @@ func main() {
 				v.Body.Color = "#ffffff"
 			}
 
-			bodyDraw(&v.Body, &view)
+			v.Body.Draw(&view)
 
 			if getOlder {
 				v.Health -= 0.05
 			}
 
-			if vehicIsDead(v) {
-				vehicDestroy(v)
+			if v.IsDead() {
+				v.Destroy()
 				vehics = append(vehics[:i], vehics[i+1:]...)
 			}
 		}
 
 		for i := range poison {
-			bodyDraw(&poison[i], &view)
+			poison[i].Draw(&view)
 		}
 
 		for i := range food {
-			bodyDraw(&food[i], &view)
+			food[i].Draw(&view)
 		}
 
-		renderFrameEnd()
+		renderer.EndFrame()
 	}
 
 	// Programm-Ende: alles zurücksetzen
-	bodyDestroy(&grid)
+	grid.Destroy()
 	for i := range poison {
-		bodyDestroy(&poison[i])
+		poison[i].Destroy()
 	}
 	for i := range food {
-		bodyDestroy(&food[i])
+		food[i].Destroy()
 	}
 	for i := range vehics {
-		vehicDestroy(&vehics[i])
+		vehics[i].Destroy()
 	}
 
 	glfw.Terminate()
