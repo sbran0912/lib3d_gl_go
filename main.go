@@ -100,7 +100,7 @@ func vehicSeek(v *Vehicle, target Vec3, isBadfood bool) {
 // foodCreate erzeugt count Food-Bodies an zufälligen Positionen.
 func foodCreate(count int, color string, mesh *Solid) []Body {
 	food := make([]Body, 0, count)
-	for i := 0; i < count; i++ {
+	for range count {
 		singleFood := bodyCreate(mesh,
 			float32(random(-100, 100)),
 			float32(random(-100, 100)),
@@ -114,7 +114,7 @@ func foodCreate(count int, color string, mesh *Solid) []Body {
 // foodRespawn ergänzt Food, falls weniger als min vorhanden sind.
 func foodRespawn(food []Body, mesh *Solid, min, count int, color string) []Body {
 	if len(food) < min {
-		for i := 0; i < count; i++ {
+		for range count {
 			singleFood := bodyCreate(mesh,
 				float32(random(-100, 100)),
 				float32(random(-100, 100)),
@@ -235,31 +235,31 @@ func main() {
 		food = foodRespawn(food, foodMesh, 20, 30, "#44ff44")
 		poison = foodRespawn(poison, foodMesh, 20, 30, "#FF0000")
 
-		for i := 0; i < len(vehics); i++ {
-			vehicBoundary(&vehics[i])
-			vehicleEatFood(&vehics[i], &food, false)
-			vehicleEatFood(&vehics[i], &poison, true)
-			vehicAlignToVelocity(&vehics[i])
-			vehicUpdate(&vehics[i])
-
-			if vehics[i].Health < 0.5 {
-				vehics[i].Body.Color = "#FF0000"
-			} else {
-				vehics[i].Body.Color = "#ffffff"
-			}
-
-			bodyDraw(&vehics[i].Body, &view)
-		}
-
 		getOlder := randomFloat(0, 1) < 0.015
 
 		for i := len(vehics) - 1; i >= 0; i-- {
-			if getOlder {
-				vehics[i].Health -= 0.05
+			v := &vehics[i]
+
+			vehicBoundary(v)
+			vehicleEatFood(v, &food, false)
+			vehicleEatFood(v, &poison, true)
+			vehicAlignToVelocity(v)
+			vehicUpdate(v)
+
+			if v.Health < 0.5 {
+				v.Body.Color = "#FF0000"
+			} else {
+				v.Body.Color = "#ffffff"
 			}
 
-			if vehicIsDead(&vehics[i]) {
-				vehicDestroy(&vehics[i])
+			bodyDraw(&v.Body, &view)
+
+			if getOlder {
+				v.Health -= 0.05
+			}
+
+			if vehicIsDead(v) {
+				vehicDestroy(v)
 				vehics = append(vehics[:i], vehics[i+1:]...)
 			}
 		}
