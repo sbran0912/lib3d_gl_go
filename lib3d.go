@@ -314,10 +314,6 @@ var (
 	screenH   float32
 	startTime float64
 
-	gFullscreen  bool
-	gWinX, gWinY int
-	gWinW, gWinH int
-
 	gMouseX      float32
 	gMouseY      float32
 	gMouseStatus int
@@ -508,33 +504,6 @@ func mouseButtonCallback(w *glfw.Window, button glfw.MouseButton, action glfw.Ac
 	}
 }
 
-func renderToggleFullscreen() {
-	if window == nil || gMonitor == nil {
-		return
-	}
-
-	if gFullscreen {
-		gFullscreen = false
-		window.SetMonitor(nil, gWinX, gWinY, gWinW, gWinH, glfw.DontCare)
-	} else {
-		gWinX, gWinY = window.GetPos()
-		gWinW, gWinH = window.GetSize()
-
-		mode := gMonitor.GetVideoMode()
-		if mode == nil {
-			return
-		}
-
-		gFullscreen = true
-		window.SetMonitor(gMonitor, 0, 0, mode.Width, mode.Height, mode.RefreshRate)
-	}
-
-	fbW, fbH := window.GetFramebufferSize()
-	screenW = float32(fbW)
-	screenH = float32(fbH)
-	gl.Viewport(0, 0, int32(fbW), int32(fbH))
-}
-
 func keyCallback(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
 	if action != glfw.Press {
 		return
@@ -542,9 +511,8 @@ func keyCallback(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action,
 
 	if key == glfw.KeyEscape {
 		w.SetShouldClose(true)
-	} else if key == glfw.KeyF11 {
-		renderToggleFullscreen()
 	}
+	// F11: Umschalten in den Fenstermodus deaktiviert
 }
 
 func renderInit(w, h int) bool {
@@ -565,20 +533,8 @@ func renderInit(w, h int) bool {
 		return false
 	}
 
-	if w > 0 {
-		gWinW = w
-	} else {
-		gWinW = 1280
-	}
-	if h > 0 {
-		gWinH = h
-	} else {
-		gWinH = 720
-	}
-
 	var err error
 	window, err = glfw.CreateWindow(mode.Width, mode.Height, "lib3d_opengl_go", gMonitor, nil)
-	gFullscreen = true
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Fenster-Erstellung fehlgeschlagen.")
 		glfw.Terminate()
