@@ -78,11 +78,6 @@ func (b *Body) GetFacePlanes(worldVerts []Vec3) PlaneArray {
 	return PlaneArray{Data: planes, Count: s.FaceCount}
 }
 
-func (pa *PlaneArray) Free() {
-	pa.Data = nil
-	pa.Count = 0
-}
-
 func (b *Body) Draw(view *Mat4x4) {
 	t := mat4x4Translate(b.Pos.X, b.Pos.Y, b.Pos.Z)
 	var world Mat4x4

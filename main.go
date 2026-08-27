@@ -143,10 +143,6 @@ func main() {
 			renderer.SetPointSize(5)
 			renderer.Point(endpoint.X, endpoint.Y, endpoint.Z)
 		}
-
-		for i := 0; i < bodyCount; i++ {
-			boxPlanes[i].Free()
-		}
 	})
 
 	// Aufräumen übernimmt renderer.Close() (GLFW-Terminate gibt alle
