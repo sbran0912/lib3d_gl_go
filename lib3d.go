@@ -673,6 +673,28 @@ func (r *Renderer) EndFrame() {
 	glfw.PollEvents()
 }
 
+// StartAnimation startet die Render-Schleife. draw wird in jedem Frame
+// aufgerufen. Kehrt zurück, wenn das Fenster geschlossen wird (ESC/F11
+// werden vom Renderer behandelt). Die Schleife kapselt BeginFrame/EndFrame,
+// sodass der Aufrufer nur noch das Zeichnen (und ggf. die Simulation)
+// bereitstellen muss.
+func (r *Renderer) StartAnimation(draw func()) {
+	for !r.window.ShouldClose() {
+		r.BeginFrame()
+		if draw != nil {
+			draw()
+		}
+		r.EndFrame()
+	}
+	r.Close()
+}
+
+// Close beendet GLFW. Beim Beenden des GL-Kontexts werden alle GL-Objekte
+// (Meshes, Shader, VAOs) automatisch freigegeben.
+func (r *Renderer) Close() {
+	glfw.Terminate()
+}
+
 func (r *Renderer) SetFog(near, far, red, green, blue, alpha float32) {
 	gl.Uniform1f(r.locFogNear, near)
 	gl.Uniform1f(r.locFogFar, far)

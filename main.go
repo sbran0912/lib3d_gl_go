@@ -3,8 +3,6 @@ package main
 import (
 	"math"
 	"runtime"
-
-	"github.com/go-gl/glfw/v3.3/glfw"
 )
 
 // Vehicle ist ein autonomes Fahrzeug der Simulation.
@@ -220,10 +218,9 @@ func main() {
 		vehics = append(vehics, vehic)
 	}
 	/*---------------------------------
-	Render-Schleife für die Animation
+	Render-Schleife (in der Library)
 	---------------------------------*/
-	for !renderer.ShouldClose() {
-		renderer.BeginFrame()
+	renderer.StartAnimation(func() {
 		renderer.Background(40, 40, 40)
 
 		view := mat4x4Lookat(camPos, target, up)
@@ -271,21 +268,6 @@ func main() {
 		for i := range food {
 			food[i].Draw(&view)
 		}
-
-		renderer.EndFrame()
-	}
-
-	// Programm-Ende: alles zurücksetzen
-	grid.Destroy()
-	for i := range poison {
-		poison[i].Destroy()
-	}
-	for i := range food {
-		food[i].Destroy()
-	}
-	for i := range vehics {
-		vehics[i].Destroy()
-	}
-
-	glfw.Terminate()
+	})
 }
+
