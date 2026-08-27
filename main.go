@@ -20,8 +20,8 @@ func main() {
 	renderer.SetFog(100.0, 600.0, 0.25, 0.25, 0.25, 1.0)
 
 	// --- Szene aufbauen ---
-	boxMesh := solidBox(100, 80, 60) // Eine Box im GPU-Speicher
-	pyrMesh := solidPyramid(90, 120) // Eine Pyramide im GPU-Speicher
+	boxMesh := solidBox(100, 80, 60) // CPU-Geometrie; Upload in den GPU-Batch pro Frame
+	pyrMesh := solidPyramid(90, 120)
 	gridMesh := solidGrid(600, 24)
 
 	bodies := make([]Body, 0, 6)

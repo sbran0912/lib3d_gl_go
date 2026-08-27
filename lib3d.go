@@ -41,16 +41,14 @@ const (
 )
 
 type Solid struct {
-	Vertices        []Vec3
-	VertexCount     int
-	Edges           []int
-	EdgeCount       int
-	Faces           []int
-	FaceCount       int
-	FaceSizes       []int
-	RefCount        int
-	MeshBuffer      uint32
-	MeshVertexCount int
+	Vertices    []Vec3
+	VertexCount int
+	Edges       []int
+	EdgeCount   int
+	Faces       []int
+	FaceCount   int
+	FaceSizes   []int
+	FlatEdges   []float32
 }
 
 type Plane struct {
@@ -329,6 +327,7 @@ type drawCmd struct {
 	effect    EffectMode
 	grad2     colorState
 	pointSize float32
+	lineW     float32
 	center    [3]float32
 	radius    float32
 	mv        [16]float32
@@ -345,6 +344,7 @@ func (c *drawCmd) canMerge(o drawCmd) bool {
 		c.effect == o.effect &&
 		c.grad2 == o.grad2 &&
 		c.pointSize == o.pointSize &&
+		c.lineW == o.lineW &&
 		c.center == o.center &&
 		c.radius == o.radius &&
 		c.mv == o.mv &&
@@ -494,18 +494,6 @@ func (m *Mat4x4) Flatten() [16]float32 {
 	return dst
 }
 
-func (r *Renderer) applyUniforms(useStroke bool) {
-	col := r.state.Fill
-	if useStroke {
-		col = r.state.Stroke
-	}
-	mode := int32(r.state.Effect)
-
-	gl.Uniform1i(r.locMode, mode)
-	gl.Uniform4f(r.locColor, col.R, col.G, col.B, col.A)
-	gl.Uniform4f(r.locColor2, r.state.Grad2.R, r.state.Grad2.G, r.state.Grad2.B, r.state.Grad2.A)
-}
-
 // submit sammelt eine Immediate-Primitive im Frame-Batch.
 // Es wird noch nichts an die GPU geschickt; das passiert erst beim
 // flushBatch (Frame-Ende bzw. vor jedem Mesh-Draw).
@@ -523,6 +511,7 @@ func (r *Renderer) submit(mode uint32, verts []float32, useStroke bool) {
 		effect:    r.state.Effect,
 		grad2:     r.state.Grad2,
 		pointSize: r.pointSize,
+		lineW:     r.state.LineW,
 		center:    r.gradCenter,
 		radius:    r.gradRadius,
 		mv:        r.mvUniform,
@@ -574,6 +563,7 @@ func (r *Renderer) flushBatch() {
 		gl.Uniform1f(r.locPointSize, c.pointSize)
 		gl.Uniform3f(r.locCenter, c.center[0], c.center[1], c.center[2])
 		gl.Uniform1f(r.locRadius, c.radius)
+		gl.LineWidth(c.lineW)
 		gl.DrawArrays(c.mode, c.first, c.count)
 	}
 
@@ -1019,28 +1009,6 @@ func (r *Renderer) Polygon(pts []float32, style DrawStyle) {
 	}
 }
 
-func (r *Renderer) CreateMesh(flatVerts []float32) uint32 {
-	var buf uint32
-	gl.GenBuffers(1, &buf)
-	gl.BindBuffer(gl.ARRAY_BUFFER, buf)
-	gl.BufferData(gl.ARRAY_BUFFER, len(flatVerts)*4, gl.Ptr(flatVerts), gl.STATIC_DRAW)
-	return buf
-}
-
-func (r *Renderer) DrawMesh(buf uint32, vertCount int) {
-	r.flushBatch() // gesammelte Primitives VOR dem Mesh zeichnen (Reihenfolge!)
-	r.applyUniforms(true)
-	gl.LineWidth(r.state.LineW)
-	gl.BindBuffer(gl.ARRAY_BUFFER, buf)
-	gl.EnableVertexAttribArray(uint32(r.locPos))
-	gl.VertexAttribPointer(uint32(r.locPos), 3, gl.FLOAT, false, 0, nil)
-	gl.DrawArrays(gl.LINES, 0, int32(vertCount))
-}
-
-func (r *Renderer) DeleteMesh(buf uint32) {
-	gl.DeleteBuffers(1, &buf)
-}
-
 func solidCreate() *Solid {
 	return &Solid{}
 }
@@ -1054,65 +1022,29 @@ func (s *Solid) Init(vertices []Vec3, edges []int) {
 	copy(s.Edges, edges)
 	s.EdgeCount = len(edges) / 2
 
-	s.MeshBuffer = 0
-	s.MeshVertexCount = 0
-}
-
-func (s *Solid) ensureMesh() {
-	if s.MeshBuffer != 0 {
-		return
-	}
-
-	totalFloats := s.EdgeCount * 2 * 3
-	verts := make([]float32, totalFloats)
+	// Kanten einmalig in das flache Float-Format expandieren. Der Upload in
+	// den GPU-Batch passiert dann pro Frame in Draw() – es gibt keinen
+	// persistenten GPU-Buffer pro Solid mehr (kein Retain/Release nötig).
+	s.FlatEdges = make([]float32, s.EdgeCount*2*3)
 	idx := 0
 	for i := 0; i < s.EdgeCount; i++ {
 		a := s.Vertices[s.Edges[i*2]]
 		b := s.Vertices[s.Edges[i*2+1]]
-		verts[idx] = a.X
-		verts[idx+1] = a.Y
-		verts[idx+2] = a.Z
+		s.FlatEdges[idx] = a.X
+		s.FlatEdges[idx+1] = a.Y
+		s.FlatEdges[idx+2] = a.Z
 		idx += 3
-		verts[idx] = b.X
-		verts[idx+1] = b.Y
-		verts[idx+2] = b.Z
+		s.FlatEdges[idx] = b.X
+		s.FlatEdges[idx+1] = b.Y
+		s.FlatEdges[idx+2] = b.Z
 		idx += 3
 	}
-
-	s.MeshBuffer = renderer.CreateMesh(verts)
-	s.MeshVertexCount = s.EdgeCount * 2
 }
 
 func (s *Solid) Draw(view, world *Mat4x4) {
-	s.ensureMesh()
 	vw := view.Mult(world)
 	renderer.SetModelview(&vw)
-	renderer.DrawMesh(s.MeshBuffer, s.MeshVertexCount)
-}
-
-func (s *Solid) Retain() {
-	s.RefCount++
-}
-
-func (s *Solid) Release() {
-	if s.RefCount > 0 {
-		s.RefCount--
-	}
-	if s.RefCount > 0 {
-		return
-	}
-	if s.MeshBuffer != 0 {
-		renderer.DeleteMesh(s.MeshBuffer)
-	}
-	// Zustand vollständig zurücksetzen, damit ein späteres Retain()
-	// (z. B. Food-Respawn auf demselben Solid) das Mesh neu aufbauen kann.
-	s.MeshBuffer = 0
-	s.MeshVertexCount = 0
-	s.RefCount = 0
-	s.Vertices = nil
-	s.Edges = nil
-	s.Faces = nil
-	s.FaceSizes = nil
+	renderer.submit(gl.LINES, s.FlatEdges, true)
 }
 
 func solidBox(w, h, d float32) *Solid {

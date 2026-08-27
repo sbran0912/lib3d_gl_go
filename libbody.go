@@ -50,16 +50,7 @@ func NewBody(solid *Solid, x, y, z float32, cfg BodyConfig) Body {
 		Color:     color,
 		LineWidth: cfg.LineWidth,
 	}
-	solid.Retain()
 	return b
-}
-
-func (b *Body) Destroy() {
-	if b.Solid == nil {
-		return
-	}
-	b.Solid.Release()
-	b.Solid = nil
 }
 
 func (b *Body) GetFacePlanes(worldVerts []Vec3) PlaneArray {
