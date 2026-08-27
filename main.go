@@ -1,14 +1,191 @@
 package main
 
 import (
-	"fmt"
 	"math"
 	"runtime"
-
-	"github.com/go-gl/glfw/v3.3/glfw"
 )
 
-const coneLines = 20
+// Vehicle ist ein autonomes Fahrzeug der Simulation.
+type Vehicle struct {
+	Body    Body
+	Vel     Vec3
+	Accel   Vec3
+	Heading Vec3
+	Health  float32
+	DNA     [4]float32
+}
+
+// NewVehicle erstellt ein neues Vehicle mit zufälliger DNA.
+func NewVehicle(body Body) Vehicle {
+	return Vehicle{
+		Body:    body,
+		Vel:     vec3(0, 0, 0),
+		Accel:   vec3(0, 0, 0),
+		Heading: vec3(0, 0, 0),
+		Health:  1,
+		DNA: [4]float32{
+			randomFloat(-1.0, 1.0),  // Force to Poison
+			randomFloat(-1.0, 1.0),  // Force to good Food
+			randomFloat(20.0, 60.0), // Radius to Poison
+			randomFloat(20.0, 60.0), // Radius to good Food
+		},
+	}
+}
+
+// AlignToVelocity richtet den Body an der Geschwindigkeit aus.
+func (v *Vehicle) AlignToVelocity() {
+	vel := v.Vel
+
+	mag := float32(math.Sqrt(float64(vel.X*vel.X + vel.Y*vel.Y + vel.Z*vel.Z)))
+	if mag < 0.0001 {
+		return
+	}
+
+	magXZ := float32(math.Sqrt(float64(vel.X*vel.X + vel.Z*vel.Z)))
+
+	// vel.Y/mag muss in [-1,1] liegen (Schutz vor NaN durch Float-Rundung)
+	cosY := vel.Y / mag
+	if cosY > 1 {
+		cosY = 1
+	} else if cosY < -1 {
+		cosY = -1
+	}
+	v.Body.RotX = float32(math.Acos(float64(cosY)))
+	if magXZ < 0.0001 {
+		v.Body.RotY = 0
+	} else {
+		v.Body.RotY = float32(math.Atan2(float64(vel.X/magXZ), float64(vel.Z/magXZ)))
+	}
+	v.Body.RotZ = 0
+
+	// heading als normalisierte Richtung ableiten
+	v.Heading = vec3(vel.X/mag, vel.Y/mag, vel.Z/mag)
+}
+
+// ApplyForce addiert eine Kraft zur Beschleunigung.
+func (v *Vehicle) ApplyForce(force Vec3) {
+	v.Accel = v.Accel.Add(force)
+}
+
+// Update integriert die Bewegung und begrenzt die Geschwindigkeit.
+func (v *Vehicle) Update() {
+	v.Vel = v.Vel.Add(v.Accel)
+	speed := v.Vel.Length()
+	v.Vel = v.Vel.Normalize().Scale(constrainNum(speed, 0.5, 2.0))
+
+	v.Accel = vec3(0, 0, 0)
+	v.Body.Pos = v.Body.Pos.Add(v.Vel)
+}
+
+// Seek steuert das Fahrzeug in Richtung eines Ziels.
+func (v *Vehicle) Seek(target Vec3, isBadfood bool) {
+	desired := target.Sub(v.Body.Pos).Limit(3.0)
+	if isBadfood {
+		desired = desired.Scale(v.DNA[0])
+	} else {
+		desired = desired.Scale(v.DNA[1])
+	}
+
+	steer := desired.Sub(v.Vel).Limit(2.0)
+	v.ApplyForce(steer.Scale(0.2))
+}
+
+// foodCreate erzeugt count Food-Bodies an zufälligen Positionen.
+func foodCreate(count int, color string, mesh *Solid) []Body {
+	food := make([]Body, 0, count)
+	for range count {
+		singleFood := NewBody(mesh,
+			float32(random(-100, 100)),
+			float32(random(-100, 100)),
+			float32(random(-100, 100)),
+			BodyConfig{Color: color, LineWidth: 1.0})
+		food = append(food, singleFood)
+	}
+	return food
+}
+
+// foodRespawn ergänzt Food, falls weniger als min vorhanden sind.
+func foodRespawn(food []Body, mesh *Solid, min, count int, color string) []Body {
+	if len(food) < min {
+		for range count {
+			singleFood := NewBody(mesh,
+				float32(random(-100, 100)),
+				float32(random(-100, 100)),
+				float32(random(-100, 100)),
+				BodyConfig{Color: color, LineWidth: 1.0})
+			food = append(food, singleFood)
+		}
+	}
+	return food
+}
+
+// EatFood sucht das nächste (gute/schlechte) Food im DNA-Radius
+// und isst es auf, sobald es nahe genug ist.
+func (v *Vehicle) EatFood(food *[]Body, isBadfood bool) {
+	minDist := float32(math.Inf(1))
+	idx := -1
+
+	filter := v.DNA[3]
+	if isBadfood {
+		filter = v.DNA[2]
+	}
+
+	for i := range *food {
+		d := v.Body.Pos.Distance((*food)[i].Pos)
+		if d < filter && d < minDist {
+			minDist = d
+			idx = i
+		}
+	}
+
+	if idx > -1 {
+		if v.Body.Pos.Distance((*food)[idx].Pos) < 3 {
+			// Food aufessen: aus dem Slice entfernen genügt – es gibt
+			// keinen GPU-Buffer/Refcount mehr freizugeben.
+			*food = append((*food)[:idx], (*food)[idx+1:]...)
+			if isBadfood {
+				v.Health -= 0.1
+			} else {
+				v.Health += 0.1
+			}
+		} else {
+			v.Seek((*food)[idx].Pos, isBadfood)
+		}
+	}
+}
+
+// ApplyBoundary reflektiert die Geschwindigkeit an den Weltgrenzen.
+func (v *Vehicle) ApplyBoundary() {
+	// Definiere deine Weltgrenzen
+	const (
+		minX = -130.0
+		maxX = 130.0
+		minY = -130.0
+		maxY = 130.0
+		minZ = -130.0
+		maxZ = 130.0
+	)
+
+	// X-Achse
+	if v.Body.Pos.X < minX || v.Body.Pos.X > maxX {
+		v.Vel.X *= -1.0
+	}
+
+	// Y-Achse (Höhe)
+	if v.Body.Pos.Y < minY || v.Body.Pos.Y > maxY {
+		v.Vel.Y *= -1.0
+	}
+
+	// Z-Achse (Tiefe)
+	if v.Body.Pos.Z < minZ || v.Body.Pos.Z > maxZ {
+		v.Vel.Z *= -1.0
+	}
+}
+
+// IsDead meldet, ob die Gesundheit des Fahrzeugs erschöpft ist.
+func (v *Vehicle) IsDead() bool {
+	return v.Health < 0.0
+}
 
 func main() {
 	runtime.LockOSThread()
@@ -16,135 +193,102 @@ func main() {
 	if !renderer.Init(1600, 1000) {
 		return
 	}
+	camPos := vec3(50, 20, 200)
+	target := vec3(0, 0, 0)
+	up := vec3(0, 1, 0)
+	renderer.SetFog(100.0, 400.0, 0.25, 0.25, 0.25, 1.0)
 
-	renderer.SetFog(100.0, 600.0, 0.25, 0.25, 0.25, 1.0)
-
-	// --- Szene aufbauen ---
-	boxMesh := solidBox(100, 80, 60) // CPU-Geometrie; Upload in den GPU-Batch pro Frame
-	pyrMesh := solidPyramid(90, 120)
 	gridMesh := solidGrid(600, 24)
-
-	bodies := make([]Body, 0, 6)
-
 	grid := NewBody(gridMesh, 0, 0, 0, BodyConfig{Color: "#777774", LineWidth: 1.0})
-	bodies = append(bodies, grid)
 
-	box1 := NewBody(boxMesh, 150, 0, 50, BodyConfig{Color: "#ff0000", LineWidth: 2.0})
-	bodies = append(bodies, box1)
+	foodMesh := solidSphere(3, 8, 8)
+	poison := foodCreate(30, "#FF0000", foodMesh)
+	food := foodCreate(30, "#44ff44", foodMesh)
 
-	box2 := NewBody(boxMesh, 0, 0, 100, BodyConfig{Color: "#00ffff", LineWidth: 2.0})
-	bodies = append(bodies, box2)
+	vehicMesh := solidPyramid(2, 6)
+	vehics := make([]Vehicle, 0, 10)
 
-	box3 := NewBody(boxMesh, -150, 0, -100, BodyConfig{Color: "#ff0000", LineWidth: 2.0})
-	bodies = append(bodies, box3)
-
-	box4 := NewBody(boxMesh, -200, 0, 30, BodyConfig{Color: "#00ffff", LineWidth: 2.0, RotY: float32(math.Pi / 2)})
-	bodies = append(bodies, box4)
-
-	pyr1 := NewBody(pyrMesh, 100, 0, -100, bodyConfigDefault)
-	bodies = append(bodies, pyr1)
-
-	lines := make([]*Line, 0, coneLines)
-
-	apex := vec3(0, 0, 0)
-	coneLen := float32(600)
-	coneAngle := float32(math.Pi / 60)
-	coneR := coneLen * float32(math.Sin(float64(coneAngle)))
-	coneZ := coneLen * float32(math.Cos(float64(coneAngle)))
-
-	for i := 0; i < coneLines; i++ {
-		a := 2.0 * float32(math.Pi) * float32(i) / float32(coneLines)
-		end := vec3(
-			apex.X+float32(math.Cos(float64(a)))*coneR,
-			apex.Y+float32(math.Sin(float64(a)))*coneR,
-			apex.Z+coneZ,
-		)
-		l := NewLine(apex, end, "#ff8800", 1)
-		lines = append(lines, l)
+	for i := 0; i < 10; i++ {
+		vehic := NewVehicle(NewBody(vehicMesh, 0, 20, 100, bodyConfigDefault))
+		vehic.Vel = vec3(randomFloat(-2, 2), randomFloat(-2, 2), randomFloat(-2, 2))
+		vehics = append(vehics, vehic)
 	}
-
-	timeAccum := float32(0)
-	coneRotY := float32(0)
-	frameCount := 0
-	fpsLast := float64(0)
-
 	/*---------------------------------
 	Render-Schleife (in der Library)
 	---------------------------------*/
 	renderer.StartAnimation(func() {
-		timeAccum += 0.02
-		frameCount++
-		now := glfw.GetTime()
-		if now-fpsLast >= 2.0 {
-			fps := float64(frameCount) / (now - fpsLast)
-			fmt.Printf("FPS: %.1f\n", fps)
-			frameCount = 0
-			fpsLast = now
-		}
-
 		renderer.Background(40, 40, 40)
-
-		camAngle := timeAccum * 0.15
-		camRadius := float32(math.Sqrt(float64(40.0*40.0 + 180.0*180.0)))
-		camHeight := float32(140.0)
-		camPos := vec3(
-			float32(math.Sin(float64(camAngle)))*camRadius,
-			camHeight,
-			float32(math.Cos(float64(camAngle)))*camRadius,
-		)
-		target := vec3(0, 0, 0)
-		up := vec3(0, 1, 0)
 
 		view := mat4x4Lookat(camPos, target, up)
 		proj := mat4x4Perspective(1.2, renderer.Aspect(), 0.1, 1000.0)
 		renderer.SetProjection(&proj)
 
-		bodyCount := len(bodies)
-		for i := 0; i < bodyCount; i++ {
-			bodies[i].Draw(&view)
-		}
+		grid.Draw(&view)
 
-		coneRotY += 0.01
-		coneRot := mat4x4Rotate(0, coneRotY, 0)
+		food = foodRespawn(food, foodMesh, 20, 30, "#44ff44")
+		poison = foodRespawn(poison, foodMesh, 20, 30, "#FF0000")
 
-		lineCount := len(lines)
-		boxPlanes := make([]PlaneArray, bodyCount)
-		for i := 0; i < bodyCount; i++ {
-			b := &bodies[i]
-			vc := b.Solid.VertexCount
-			worldVerts := make([]Vec3, vc)
-			rot := mat4x4Rotate(b.RotX, b.RotY, b.RotZ)
-			for j := 0; j < vc; j++ {
-				worldVerts[j] = b.Solid.Vertices[j].Transform(&rot).Add(b.Pos)
-			}
-			boxPlanes[i] = b.GetFacePlanes(worldVerts)
-		}
+		getOlder := randomFloat(0, 1) < 0.015
 
-		for i := 0; i < lineCount; i++ {
-			rotatedEnd := lines[i].P2.RotateAround(lines[i].P1, &coneRot)
-			endpoint := rotatedEnd
-			maxDist := rotatedEnd.Sub(lines[i].P1).SquaredLength()
+		for i := len(vehics) - 1; i >= 0; i-- {
+			v := &vehics[i]
 
-			for j := 0; j < bodyCount; j++ {
-				for k := 0; k < boxPlanes[j].Count; k++ {
-					var hit Vec3
-					if boxPlanes[j].Data[k].IntersectLine(lines[i].P1, rotatedEnd, &hit) {
-						dist := hit.Sub(lines[i].P1).SquaredLength()
-						if dist < maxDist {
-							endpoint = hit
-							maxDist = dist
-						}
-					}
-				}
+			v.ApplyBoundary()
+			v.EatFood(&food, false)
+			v.EatFood(&poison, true)
+			v.AlignToVelocity()
+			v.Update()
+
+			if v.Health < 0.5 {
+				v.Body.Color = "#FF0000"
+			} else {
+				v.Body.Color = "#ffffff"
 			}
 
-			lines[i].Draw(&view, &endpoint)
-			renderer.SetStrokeColorHex("#ff0000")
-			renderer.SetPointSize(5)
-			renderer.Point(endpoint.X, endpoint.Y, endpoint.Z)
+			v.Body.Draw(&view)
+
+			if getOlder {
+				v.Health -= 0.05
+			}
+
+			if v.IsDead() {
+				// Kein Refcount-/GPU-Aufräumen mehr nötig – der Body hält
+				// nur CPU-Geometrie. Entfernen aus dem Slice genügt.
+				vehics = append(vehics[:i], vehics[i+1:]...)
+			}
+		}
+
+		for i := range poison {
+			poison[i].Draw(&view)
+		}
+
+		for i := range food {
+			food[i].Draw(&view)
+		}
+
+		// Debug-Overlays (Batched Drawing): Heading-Pfeile + DNA-Radien.
+		// Die Primitives werden nur gesammelt und am Frame-Ende in einem
+		// einzigen VBO gezeichnet (kein GenBuffers/DeleteBuffers pro Call).
+		renderer.SetModelview(&view)
+		for i := range vehics {
+			v := &vehics[i]
+			hp := v.Body.Pos
+
+			// Heading-Pfeil: Linie vom Fahrzeug in Fahrtrichtung.
+			if v.Health < 0.5 {
+				renderer.SetStrokeColorHex("#ff4444")
+			} else {
+				renderer.SetStrokeColorHex("#ffffff")
+			}
+			end := hp.Add(v.Heading.Scale(8))
+			renderer.Line(hp.X, hp.Y, hp.Z, end.X, end.Y, end.Z)
+
+			// DNA-Radien als Kreise in der XZ-Ebene. Circle(x,y,z) zeichnet
+			// in der XY-Ebene – durch den Tausch (x, z, y) liegt der Kreis flach.
+			renderer.SetStrokeColor(51, 255, 51, 64) // guter Food-Radius (DNA[3])
+			renderer.Circle(hp.X, hp.Z, hp.Y, v.DNA[3], Stroke, 48)
+			renderer.SetStrokeColor(255, 51, 51, 64) // Gift-Radius (DNA[2])
+			renderer.Circle(hp.X, hp.Z, hp.Y, v.DNA[2], Stroke, 48)
 		}
 	})
-
-	// Aufräumen übernimmt renderer.Close() (GLFW-Terminate gibt alle
-	// GL-Objekte frei) – analog zum Vehicle-Beispiel.
 }
