@@ -268,6 +268,30 @@ func main() {
 		for i := range food {
 			food[i].Draw(&view)
 		}
+
+		// Debug-Overlays (Batched Drawing): Heading-Pfeile + DNA-Radien.
+		// Die Primitives werden nur gesammelt und am Frame-Ende in einem
+		// einzigen VBO gezeichnet (kein GenBuffers/DeleteBuffers pro Call).
+		renderer.SetModelview(&view)
+		for i := range vehics {
+			v := &vehics[i]
+			hp := v.Body.Pos
+
+			// Heading-Pfeil: Linie vom Fahrzeug in Fahrtrichtung.
+			if v.Health < 0.5 {
+				renderer.SetStrokeColorHex("#ff4444")
+			} else {
+				renderer.SetStrokeColorHex("#ffffff")
+			}
+			end := hp.Add(v.Heading.Scale(8))
+			renderer.Line(hp.X, hp.Y, hp.Z, end.X, end.Y, end.Z)
+
+			// DNA-Radien als Kreise in der XZ-Ebene. Circle(x,y,z) zeichnet
+			// in der XY-Ebene – durch den Tausch (x, z, y) liegt der Kreis flach.
+			renderer.SetStrokeColor(51, 255, 51, 64) // guter Food-Radius (DNA[3])
+			renderer.Circle(hp.X, hp.Z, hp.Y, v.DNA[3], Stroke, 48)
+			renderer.SetStrokeColor(255, 51, 51, 64) // Gift-Radius (DNA[2])
+			renderer.Circle(hp.X, hp.Z, hp.Y, v.DNA[2], Stroke, 48)
+		}
 	})
 }
-

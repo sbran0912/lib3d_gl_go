@@ -318,6 +318,39 @@ type drawState struct {
 	Grad2  colorState
 }
 
+// drawCmd ist ein gesammelter Zeichenbefehl für eine Immediate-Primitive.
+// Alle Befehle eines Frames werden gepuffert und am Frame-Ende mit einem
+// einzigen wiederverwendbaren VBO gezeichnet (Batched Drawing).
+type drawCmd struct {
+	mode      uint32
+	first     int32
+	count     int32
+	col       colorState
+	effect    EffectMode
+	grad2     colorState
+	pointSize float32
+	center    [3]float32
+	radius    float32
+	mv        [16]float32
+	proj      [16]float32
+}
+
+// canMerge prüft, ob zwei aufeinanderfolgende Befehle identischen Zustand
+// haben und zu einem DrawArrays-Aufruf zusammengefasst werden können.
+// LINE_LOOP wird nie zusammengefasst, weil ein Loop sich selbst schließt.
+func (c *drawCmd) canMerge(o drawCmd) bool {
+	return c.mode == o.mode &&
+		c.mode != gl.LINE_LOOP &&
+		c.col == o.col &&
+		c.effect == o.effect &&
+		c.grad2 == o.grad2 &&
+		c.pointSize == o.pointSize &&
+		c.center == o.center &&
+		c.radius == o.radius &&
+		c.mv == o.mv &&
+		c.proj == o.proj
+}
+
 const maxStack = 64
 
 // Renderer kapselt den gesamten OpenGL-/Fensterzustand.
@@ -355,6 +388,19 @@ type Renderer struct {
 	stateStack    [maxStack]drawState
 	stateStackTop int
 	state         drawState
+
+	// Batching: gesammelte Immediate-Primitives eines Frames.
+	batchVerts []float32
+	batchCmds  []drawCmd
+	batchBuf   uint32
+	batchCap   int
+
+	// Zuletzt gesetzte Uniform-Werte (für den Batch-Snapshot pro Befehl).
+	mvUniform   [16]float32
+	projUniform [16]float32
+	pointSize   float32
+	gradCenter  [3]float32
+	gradRadius  float32
 }
 
 var renderer = &Renderer{}
@@ -460,15 +506,79 @@ func (r *Renderer) applyUniforms(useStroke bool) {
 	gl.Uniform4f(r.locColor2, r.state.Grad2.R, r.state.Grad2.G, r.state.Grad2.B, r.state.Grad2.A)
 }
 
-func (r *Renderer) drawVertices(verts []float32, mode uint32) {
-	var buf uint32
-	gl.GenBuffers(1, &buf)
-	gl.BindBuffer(gl.ARRAY_BUFFER, buf)
-	gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.DYNAMIC_DRAW)
+// submit sammelt eine Immediate-Primitive im Frame-Batch.
+// Es wird noch nichts an die GPU geschickt; das passiert erst beim
+// flushBatch (Frame-Ende bzw. vor jedem Mesh-Draw).
+func (r *Renderer) submit(mode uint32, verts []float32, useStroke bool) {
+	col := r.state.Fill
+	if useStroke {
+		col = r.state.Stroke
+	}
+
+	cmd := drawCmd{
+		mode:      mode,
+		first:     int32(len(r.batchVerts) / 3),
+		count:     int32(len(verts) / 3),
+		col:       col,
+		effect:    r.state.Effect,
+		grad2:     r.state.Grad2,
+		pointSize: r.pointSize,
+		center:    r.gradCenter,
+		radius:    r.gradRadius,
+		mv:        r.mvUniform,
+		proj:      r.projUniform,
+	}
+	r.batchVerts = append(r.batchVerts, verts...)
+
+	// Aufeinanderfolgende Befehle mit identischem Zustand zu einem
+	// DrawArrays-Aufruf zusammenfassen (weniger Draw-Calls).
+	if n := len(r.batchCmds); n > 0 && r.batchCmds[n-1].canMerge(cmd) {
+		r.batchCmds[n-1].count += cmd.count
+		return
+	}
+	r.batchCmds = append(r.batchCmds, cmd)
+}
+
+// flushBatch zeichnet alle gesammelten Primitives des Frames mit einem
+// einzigen wiederverwendbaren VBO. Es gibt kein GenBuffers/DeleteBuffers
+// pro Aufruf mehr; der GPU-Speicher wird nur beim Wachsen neu allokiert.
+func (r *Renderer) flushBatch() {
+	if len(r.batchCmds) == 0 {
+		return
+	}
+
+	if r.batchBuf == 0 {
+		gl.GenBuffers(1, &r.batchBuf)
+	}
+	gl.BindBuffer(gl.ARRAY_BUFFER, r.batchBuf)
+
+	byteLen := len(r.batchVerts) * 4
+	if byteLen > r.batchCap {
+		// Nur beim Wachsen neu allozieren, sonst in-place ersetzen.
+		gl.BufferData(gl.ARRAY_BUFFER, byteLen, gl.Ptr(r.batchVerts), gl.DYNAMIC_DRAW)
+		r.batchCap = byteLen
+	} else {
+		gl.BufferSubData(gl.ARRAY_BUFFER, 0, byteLen, gl.Ptr(r.batchVerts))
+	}
+
 	gl.EnableVertexAttribArray(uint32(r.locPos))
 	gl.VertexAttribPointer(uint32(r.locPos), 3, gl.FLOAT, false, 0, nil)
-	gl.DrawArrays(mode, 0, int32(len(verts)/3))
-	gl.DeleteBuffers(1, &buf)
+
+	for i := range r.batchCmds {
+		c := &r.batchCmds[i]
+		gl.UniformMatrix4fv(r.locModelView, 1, false, &c.mv[0])
+		gl.UniformMatrix4fv(r.locProjection, 1, false, &c.proj[0])
+		gl.Uniform1i(r.locMode, int32(c.effect))
+		gl.Uniform4f(r.locColor, c.col.R, c.col.G, c.col.B, c.col.A)
+		gl.Uniform4f(r.locColor2, c.grad2.R, c.grad2.G, c.grad2.B, c.grad2.A)
+		gl.Uniform1f(r.locPointSize, c.pointSize)
+		gl.Uniform3f(r.locCenter, c.center[0], c.center[1], c.center[2])
+		gl.Uniform1f(r.locRadius, c.radius)
+		gl.DrawArrays(c.mode, c.first, c.count)
+	}
+
+	r.batchVerts = r.batchVerts[:0]
+	r.batchCmds = r.batchCmds[:0]
 }
 
 func shapeMetrics3d(pts []float32) (cx, cy, cz, r float32) {
@@ -626,6 +736,15 @@ func (r *Renderer) Init(w, h int) bool {
 	r.state.Effect = EffectFlat
 	r.state.Grad2 = colorState{0, 0, 0, 1}
 
+	// Batch-Zustand initialisieren (entspricht den oben gesetzten Uniforms).
+	r.mvUniform = [16]float32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
+	r.projUniform = r.mvUniform
+	r.pointSize = 4.0
+	r.gradCenter = [3]float32{0, 0, 0}
+	r.gradRadius = 1
+	r.batchBuf = 0
+	r.batchCap = 0
+
 	return true
 }
 
@@ -669,6 +788,7 @@ func (r *Renderer) BeginFrame() {
 }
 
 func (r *Renderer) EndFrame() {
+	r.flushBatch() // alle gesammelten Primitives des Frames zeichnen
 	r.window.SwapBuffers()
 	glfw.PollEvents()
 }
@@ -692,6 +812,11 @@ func (r *Renderer) StartAnimation(draw func()) {
 // Close beendet GLFW. Beim Beenden des GL-Kontexts werden alle GL-Objekte
 // (Meshes, Shader, VAOs) automatisch freigegeben.
 func (r *Renderer) Close() {
+	r.flushBatch()
+	if r.batchBuf != 0 {
+		gl.DeleteBuffers(1, &r.batchBuf)
+		r.batchBuf = 0
+	}
 	glfw.Terminate()
 }
 
@@ -719,16 +844,18 @@ func (r *Renderer) IsMouseUp() bool {
 }
 
 func (r *Renderer) SetProjection(m *Mat4x4) {
-	fm := m.Flatten()
-	gl.UniformMatrix4fv(r.locProjection, 1, false, &fm[0])
+	r.projUniform = m.Flatten()
+	gl.UniformMatrix4fv(r.locProjection, 1, false, &r.projUniform[0])
 }
 
 func (r *Renderer) SetModelview(m *Mat4x4) {
-	fm := m.Flatten()
-	gl.UniformMatrix4fv(r.locModelView, 1, false, &fm[0])
+	r.mvUniform = m.Flatten()
+	gl.UniformMatrix4fv(r.locModelView, 1, false, &r.mvUniform[0])
 }
 
 func (r *Renderer) SetGradientCenter(cx, cy, cz, radius float32) {
+	r.gradCenter = [3]float32{cx, cy, cz}
+	r.gradRadius = radius
 	gl.Uniform3f(r.locCenter, cx, cy, cz)
 	gl.Uniform1f(r.locRadius, radius)
 }
@@ -763,31 +890,30 @@ func (r *Renderer) SetGradient(red, green, blue, alpha float32) {
 func (r *Renderer) SetGradientHex(hex string) { r.state.Grad2 = parseColorHex(hex) }
 
 func (r *Renderer) Background(red, green, blue float32) {
+	r.flushBatch()
 	c := parseColorRGB(red, green, blue)
 	gl.ClearColor(c.R, c.G, c.B, c.A)
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 }
 
 func (r *Renderer) BackgroundHex(hex string) {
+	r.flushBatch()
 	c := parseColorHex(hex)
 	gl.ClearColor(c.R, c.G, c.B, c.A)
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 }
 
 func (r *Renderer) SetPointSize(px float32) {
+	r.pointSize = px
 	gl.Uniform1f(r.locPointSize, px)
 }
 
 func (r *Renderer) Point(x, y, z float32) {
-	r.applyUniforms(true)
-	v := []float32{x, y, z}
-	r.drawVertices(v, gl.POINTS)
+	r.submit(gl.POINTS, []float32{x, y, z}, true)
 }
 
 func (r *Renderer) Line(x1, y1, z1, x2, y2, z2 float32) {
-	r.applyUniforms(true)
-	v := []float32{x1, y1, z1, x2, y2, z2}
-	r.drawVertices(v, gl.LINES)
+	r.submit(gl.LINES, []float32{x1, y1, z1, x2, y2, z2}, true)
 }
 
 func (r *Renderer) Triangle(x1, y1, z1, x2, y2, z2, x3, y3, z3 float32, style DrawStyle) {
@@ -795,13 +921,11 @@ func (r *Renderer) Triangle(x1, y1, z1, x2, y2, z2, x3, y3, z3 float32, style Dr
 	shapeMetrics3d(pts)
 
 	if style == Fill || style == Both {
-		r.applyUniforms(false)
-		r.drawVertices(pts, gl.TRIANGLES)
+		r.submit(gl.TRIANGLES, pts, false)
 	}
 	if style == Stroke || style == Both {
-		r.applyUniforms(true)
 		s := []float32{x1, y1, z1, x2, y2, z2, x2, y2, z2, x3, y3, z3, x3, y3, z3, x1, y1, z1}
-		r.drawVertices(s, gl.LINES)
+		r.submit(gl.LINES, s, true)
 	}
 }
 
@@ -810,14 +934,12 @@ func (r *Renderer) Shape(x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4 float32,
 	shapeMetrics3d(pts)
 
 	if style == Fill || style == Both {
-		r.applyUniforms(false)
 		f := []float32{x1, y1, z1, x2, y2, z2, x3, y3, z3, x1, y1, z1, x3, y3, z3, x4, y4, z4}
-		r.drawVertices(f, gl.TRIANGLES)
+		r.submit(gl.TRIANGLES, f, false)
 	}
 	if style == Stroke || style == Both {
-		r.applyUniforms(true)
 		s := []float32{x1, y1, z1, x2, y2, z2, x2, y2, z2, x3, y3, z3, x3, y3, z3, x4, y4, z4, x4, y4, z4, x1, y1, z1}
-		r.drawVertices(s, gl.LINES)
+		r.submit(gl.LINES, s, true)
 	}
 }
 
@@ -849,8 +971,7 @@ func (r *Renderer) Circle(x, y, z, radius float32, style DrawStyle, segments int
 			fill[fi+2] = z
 			fi += 3
 		}
-		r.applyUniforms(false)
-		r.drawVertices(fill, gl.TRIANGLES)
+		r.submit(gl.TRIANGLES, fill, false)
 	}
 
 	if style == Stroke || style == Both {
@@ -863,8 +984,7 @@ func (r *Renderer) Circle(x, y, z, radius float32, style DrawStyle, segments int
 			stroke[si+2] = z
 			si += 3
 		}
-		r.applyUniforms(true)
-		r.drawVertices(stroke, gl.LINE_LOOP)
+		r.submit(gl.LINE_LOOP, stroke, true)
 	}
 }
 
@@ -892,12 +1012,10 @@ func (r *Renderer) Polygon(pts []float32, style DrawStyle) {
 			fill[fi+2] = pts[i*3+5]
 			fi += 3
 		}
-		r.applyUniforms(false)
-		r.drawVertices(fill, gl.TRIANGLES)
+		r.submit(gl.TRIANGLES, fill, false)
 	}
 	if style == Stroke || style == Both {
-		r.applyUniforms(true)
-		r.drawVertices(pts, gl.LINE_LOOP)
+		r.submit(gl.LINE_LOOP, pts, true)
 	}
 }
 
@@ -910,6 +1028,7 @@ func (r *Renderer) CreateMesh(flatVerts []float32) uint32 {
 }
 
 func (r *Renderer) DrawMesh(buf uint32, vertCount int) {
+	r.flushBatch() // gesammelte Primitives VOR dem Mesh zeichnen (Reihenfolge!)
 	r.applyUniforms(true)
 	gl.LineWidth(r.state.LineW)
 	gl.BindBuffer(gl.ARRAY_BUFFER, buf)
@@ -976,13 +1095,20 @@ func (s *Solid) Retain() {
 }
 
 func (s *Solid) Release() {
-	s.RefCount--
+	if s.RefCount > 0 {
+		s.RefCount--
+	}
 	if s.RefCount > 0 {
 		return
 	}
 	if s.MeshBuffer != 0 {
 		renderer.DeleteMesh(s.MeshBuffer)
 	}
+	// Zustand vollständig zurücksetzen, damit ein späteres Retain()
+	// (z. B. Food-Respawn auf demselben Solid) das Mesh neu aufbauen kann.
+	s.MeshBuffer = 0
+	s.MeshVertexCount = 0
+	s.RefCount = 0
 	s.Vertices = nil
 	s.Edges = nil
 	s.Faces = nil
