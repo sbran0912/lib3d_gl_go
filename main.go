@@ -199,12 +199,10 @@ func main() {
 	if !renderer.Init(1600, 1000) {
 		return
 	}
-	camPos := vec3(50, 100, 200)
+	camPos := vec3(50, 20, 200)
 	target := vec3(0, 0, 0)
 	up := vec3(0, 1, 0)
 	renderer.SetFog(100.0, 400.0, 0.25, 0.25, 0.25, 1.0)
-
-	randomInit()
 
 	gridMesh := solidGrid(600, 24)
 	grid := NewBody(gridMesh, 0, 0, 0, BodyConfig{Color: "#777774", LineWidth: 1.0})
@@ -221,7 +219,9 @@ func main() {
 		vehic.Vel = vec3(randomFloat(-2, 2), randomFloat(-2, 2), randomFloat(-2, 2))
 		vehics = append(vehics, vehic)
 	}
-
+	/*---------------------------------
+	Render-Schleife für die Animation
+	---------------------------------*/
 	for !renderer.ShouldClose() {
 		renderer.BeginFrame()
 		renderer.Background(40, 40, 40)

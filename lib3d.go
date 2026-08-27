@@ -323,11 +323,16 @@ const maxStack = 64
 // Renderer kapselt den gesamten OpenGL-/Fensterzustand.
 type Renderer struct {
 	window    *glfw.Window
-	monitor   *glfw.Monitor
 	program   uint32
 	screenW   float32
 	screenH   float32
 	startTime float64
+
+	// Vollbild-Umschaltung (F11): Start im Fenstermodus,
+	// Größe/Position merken für die Rückkehr zum Fenstermodus.
+	isFullscreen       bool
+	winPrevW, winPrevH int
+	winPosX, winPosY   int
 
 	mouseX      float32
 	mouseY      float32
@@ -513,7 +518,17 @@ func (r *Renderer) keyCallback(w *glfw.Window, key glfw.Key, scancode int, actio
 	if key == glfw.KeyEscape {
 		w.SetShouldClose(true)
 	}
-	// F11: Umschalten in den Fenstermodus deaktiviert
+	if key == glfw.KeyF11 {
+		r.ToggleFullscreen()
+	}
+}
+
+// framebufferSizeCallback wird bei jeder Größenänderung des Framebuffers
+// aufgerufen (z. B. beim Umschalten Vollbild <-> Fenster oder beim Ziehen).
+func (r *Renderer) framebufferSizeCallback(w *glfw.Window, width, height int) {
+	r.screenW = float32(width)
+	r.screenH = float32(height)
+	gl.Viewport(0, 0, int32(width), int32(height))
 }
 
 func (r *Renderer) Init(w, h int) bool {
@@ -526,16 +541,13 @@ func (r *Renderer) Init(w, h int) bool {
 	glfw.WindowHint(glfw.ContextVersionMinor, 3)
 	glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
 
-	r.monitor = glfw.GetPrimaryMonitor()
-	mode := r.monitor.GetVideoMode()
-	if mode == nil {
-		fmt.Fprintln(os.Stderr, "Video-Modus nicht verfügbar.")
-		glfw.Terminate()
-		return false
-	}
-
+	// Wir starten im Fenstermodus mit der gewünschten Größe w x h.
+	// (Vollbild ist auf manchen Treibern/Wayland-Konfigurationen
+	// problematisch beim Erstellen des GL-Kontexts.) Über F11 kann
+	// später via ToggleFullscreen() in den Vollbildmodus gewechselt
+	// werden.
 	var err error
-	r.window, err = glfw.CreateWindow(mode.Width, mode.Height, "lib3d_opengl_go", r.monitor, nil)
+	r.window, err = glfw.CreateWindow(w, h, "lib3d_opengl_go", nil, nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Fenster-Erstellung fehlgeschlagen.")
 		glfw.Terminate()
@@ -549,13 +561,15 @@ func (r *Renderer) Init(w, h int) bool {
 	}
 	r.window.SetCursorPosCallback(r.cursorCallback)
 	r.window.SetMouseButtonCallback(r.mouseButtonCallback)
+	r.window.SetFramebufferSizeCallback(r.framebufferSizeCallback)
 	r.window.SetKeyCallback(r.keyCallback)
 
 	fbW, fbH := r.window.GetFramebufferSize()
-	r.screenW = float32(fbW)
-	r.screenH = float32(fbH)
-	w = fbW
-	h = fbH
+	r.framebufferSizeCallback(r.window, fbW, fbH)
+
+	// Fenstergröße für die Rückkehr aus dem Vollbildmodus merken.
+	r.isFullscreen = false
+	r.winPrevW, r.winPrevH = w, h
 
 	vertSrc, err := os.ReadFile("shaders/vert.glsl")
 	if err != nil {
@@ -602,7 +616,7 @@ func (r *Renderer) Init(w, h int) bool {
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	gl.Enable(gl.PROGRAM_POINT_SIZE)
 
-	gl.Viewport(0, 0, int32(w), int32(h))
+	gl.Viewport(0, 0, int32(r.screenW), int32(r.screenH))
 	r.startTime = glfw.GetTime()
 	r.stateStackTop = -1
 
@@ -613,6 +627,36 @@ func (r *Renderer) Init(w, h int) bool {
 	r.state.Grad2 = colorState{0, 0, 0, 1}
 
 	return true
+}
+
+// ToggleFullscreen schaltet zwischen Fenster- und Vollbildmodus um
+// (Demo: Taste F11).
+func (r *Renderer) ToggleFullscreen() {
+	if r.window == nil {
+		return
+	}
+
+	if !r.isFullscreen {
+		monitor := glfw.GetPrimaryMonitor()
+		if monitor == nil {
+			return
+		}
+		mode := monitor.GetVideoMode()
+		if mode == nil {
+			return
+		}
+
+		// Aktuelle Fenstergröße/-position merken, damit zurückgeschaltet
+		// werden kann.
+		r.winPosX, r.winPosY = r.window.GetPos()
+		r.winPrevW, r.winPrevH = r.window.GetSize()
+
+		r.window.SetMonitor(monitor, 0, 0, mode.Width, mode.Height, mode.RefreshRate)
+		r.isFullscreen = true
+	} else {
+		r.window.SetMonitor(nil, r.winPosX, r.winPosY, r.winPrevW, r.winPrevH, 0)
+		r.isFullscreen = false
+	}
 }
 
 func (r *Renderer) ShouldClose() bool {

@@ -8,10 +8,6 @@ import (
 
 var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-func randomInit() {
-	rng = rand.New(rand.NewSource(time.Now().UnixNano()))
-}
-
 func random(start, end int) int {
 	return rng.Intn(end-start+1) + start
 }
