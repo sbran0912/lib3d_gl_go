@@ -90,6 +90,7 @@ func (b *Body) Draw(view *Mat4x4) {
 
 	renderer.SetStrokeWidth(b.LineWidth)
 	renderer.SetStrokeColorHex(b.Color)
+	renderer.SetFillColorHex(b.Color) // Füllfarbe für die Flächen
 
 	b.Solid.Draw(view, &world)
 }
@@ -97,5 +98,3 @@ func (b *Body) Draw(view *Mat4x4) {
 func (a *Body) Distance(b *Body) float32 {
 	return a.Pos.Distance(b.Pos)
 }
-
-

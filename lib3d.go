@@ -49,6 +49,7 @@ type Solid struct {
 	FaceCount   int
 	FaceSizes   []int
 	FlatEdges   []float32
+	FlatFaces   []float32
 }
 
 type Plane struct {
@@ -332,6 +333,7 @@ type drawCmd struct {
 	radius    float32
 	mv        [16]float32
 	proj      [16]float32
+	lit       uint32
 }
 
 // canMerge prüft, ob zwei aufeinanderfolgende Befehle identischen Zustand
@@ -348,7 +350,8 @@ func (c *drawCmd) canMerge(o drawCmd) bool {
 		c.center == o.center &&
 		c.radius == o.radius &&
 		c.mv == o.mv &&
-		c.proj == o.proj
+		c.proj == o.proj &&
+		c.lit == o.lit
 }
 
 const maxStack = 64
@@ -384,6 +387,8 @@ type Renderer struct {
 	locFogNear    int32
 	locFogFar     int32
 	locFogColor   int32
+	locLighted    int32
+	locLightDir   int32
 
 	stateStack    [maxStack]drawState
 	stateStackTop int
@@ -499,8 +504,11 @@ func (m *Mat4x4) Flatten() [16]float32 {
 // flushBatch (Frame-Ende bzw. vor jedem Mesh-Draw).
 func (r *Renderer) submit(mode uint32, verts []float32, useStroke bool) {
 	col := r.state.Fill
+	var lit uint32
 	if useStroke {
 		col = r.state.Stroke
+	} else {
+		lit = 1 // gefüllte Flächen werden mit Flat Shading beleuchtet
 	}
 
 	cmd := drawCmd{
@@ -516,6 +524,7 @@ func (r *Renderer) submit(mode uint32, verts []float32, useStroke bool) {
 		radius:    r.gradRadius,
 		mv:        r.mvUniform,
 		proj:      r.projUniform,
+		lit:       lit,
 	}
 	r.batchVerts = append(r.batchVerts, verts...)
 
@@ -558,6 +567,7 @@ func (r *Renderer) flushBatch() {
 		gl.UniformMatrix4fv(r.locModelView, 1, false, &c.mv[0])
 		gl.UniformMatrix4fv(r.locProjection, 1, false, &c.proj[0])
 		gl.Uniform1i(r.locMode, int32(c.effect))
+		gl.Uniform1i(r.locLighted, int32(c.lit))
 		gl.Uniform4f(r.locColor, c.col.R, c.col.G, c.col.B, c.col.A)
 		gl.Uniform4f(r.locColor2, c.grad2.R, c.grad2.G, c.grad2.B, c.grad2.A)
 		gl.Uniform1f(r.locPointSize, c.pointSize)
@@ -698,10 +708,14 @@ func (r *Renderer) Init(w, h int) bool {
 	r.locFogNear = gl.GetUniformLocation(r.program, gl.Str("uFogNear\x00"))
 	r.locFogFar = gl.GetUniformLocation(r.program, gl.Str("uFogFar\x00"))
 	r.locFogColor = gl.GetUniformLocation(r.program, gl.Str("uFogColor\x00"))
+	r.locLighted = gl.GetUniformLocation(r.program, gl.Str("uLighted\x00"))
+	r.locLightDir = gl.GetUniformLocation(r.program, gl.Str("uLightDir\x00"))
 
 	gl.Uniform1f(r.locPointSize, 4.0)
 	gl.Uniform3f(r.locCenter, 0, 0, 0)
 	gl.Uniform1f(r.locRadius, 1)
+	gl.Uniform1i(r.locLighted, 0)
+	gl.Uniform3f(r.locLightDir, 0.5, 0.8, 0.3)
 
 	identity := [16]float32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
 	gl.UniformMatrix4fv(r.locProjection, 1, false, &identity[0])
@@ -712,6 +726,7 @@ func (r *Renderer) Init(w, h int) bool {
 	gl.BindVertexArray(vao)
 
 	gl.Enable(gl.DEPTH_TEST)
+	gl.DepthFunc(gl.LEQUAL) // koplanare Kanten bleiben sichtbar (sonst Z-Fighting mit Flächen)
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	gl.Enable(gl.PROGRAM_POINT_SIZE)
@@ -1039,12 +1054,39 @@ func (s *Solid) Init(vertices []Vec3, edges []int) {
 		s.FlatEdges[idx+2] = b.Z
 		idx += 3
 	}
+
+	// Flächen triangulieren (Fan aus Index 0) und in Float-Format expandieren.
+	// Für Solids ohne Face-Daten (z. B. Grid) bleibt FlatFaces leer.
+	s.FlatFaces = nil
+	if s.Faces != nil {
+		var flat []float32
+		fi := 0
+		for i := 0; i < s.FaceCount; i++ {
+			fsize := 4
+			if s.FaceSizes != nil {
+				fsize = s.FaceSizes[i]
+			}
+			if fsize >= 3 {
+				for j := 1; j < fsize-1; j++ {
+					for _, k := range []int{0, j, j + 1} {
+						v := s.Vertices[s.Faces[fi+k]]
+						flat = append(flat, v.X, v.Y, v.Z)
+					}
+				}
+			}
+			fi += fsize
+		}
+		s.FlatFaces = flat
+	}
 }
 
 func (s *Solid) Draw(view, world *Mat4x4) {
 	vw := view.Mult(world)
 	renderer.SetModelview(&vw)
-	renderer.submit(gl.LINES, s.FlatEdges, true)
+	if len(s.FlatFaces) > 0 {
+		renderer.submit(gl.TRIANGLES, s.FlatFaces, false) // Flächen (Fill-Farbe, beleuchtet)
+	}
+	renderer.submit(gl.LINES, s.FlatEdges, true) // Kanten (Stroke-Farbe, unbelichtet)
 }
 
 func solidBox(w, h, d float32) *Solid {
@@ -1073,8 +1115,8 @@ func solidBox(w, h, d float32) *Solid {
 	}
 
 	s := solidCreate()
-	s.Init(verts, edges)
 
+	// Face-Daten MÜSSEN vor Init gesetzt sein, da Init daraus FlatFaces baut.
 	s.FaceCount = 6
 	s.Faces = make([]int, 24)
 	copy(s.Faces, rawFaces)
@@ -1083,6 +1125,7 @@ func solidBox(w, h, d float32) *Solid {
 		s.FaceSizes[i] = 4
 	}
 
+	s.Init(verts, edges)
 	return s
 }
 
@@ -1107,14 +1150,15 @@ func solidPyramid(base, height float32) *Solid {
 	sizes := []int{3, 3, 3, 3, 4}
 
 	s := solidCreate()
-	s.Init(verts, edges)
 
+	// Face-Daten MÜSSEN vor Init gesetzt sein, da Init daraus FlatFaces baut.
 	s.FaceCount = 5
 	s.Faces = make([]int, len(rawFaces))
 	copy(s.Faces, rawFaces)
 	s.FaceSizes = make([]int, 5)
 	copy(s.FaceSizes, sizes)
 
+	s.Init(verts, edges)
 	return s
 }
 
@@ -1198,7 +1242,33 @@ func solidSphere(radius float32, slices, stacks int) *Solid {
 		}
 	}
 
+	// Flächen: jedes Gitterzellen-Quad (stacks × slices) wird eine Face.
+	// An den Polen sind zwei Vertices identisch -> degenerierte, aber
+	// harmlose Quads. Muss VOR Init gesetzt werden, da Init daraus
+	// FlatFaces baut.
+	faceCount := stacks * slices
+	faces := make([]int, faceCount*4)
+	faceSizes := make([]int, faceCount)
+	fi := 0
+	for i := 0; i < stacks; i++ {
+		for j := 0; j < slices; j++ {
+			a := i*stride + j
+			b := i*stride + j + 1
+			c := (i+1)*stride + j + 1
+			d := (i+1)*stride + j
+			faces[fi] = a
+			faces[fi+1] = b
+			faces[fi+2] = c
+			faces[fi+3] = d
+			faceSizes[i*slices+j] = 4
+			fi += 4
+		}
+	}
+
 	s := solidCreate()
+	s.FaceCount = faceCount
+	s.Faces = faces
+	s.FaceSizes = faceSizes
 	s.Init(verts, edges[:ei])
 	return s
 }
