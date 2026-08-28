@@ -98,24 +98,4 @@ func (a *Body) Distance(b *Body) float32 {
 	return a.Pos.Distance(b.Pos)
 }
 
-func NewLine(p1, p2 Vec3, color string, width float32) *Line {
-	return &Line{
-		P1:        p1,
-		P2:        p2,
-		Color:     color,
-		LineWidth: width,
-	}
-}
 
-func (l *Line) Draw(view *Mat4x4, toPoint *Vec3) {
-	ident := mat4x4Identity()
-	mv := view.Mult(&ident)
-	renderer.SetModelview(&mv)
-	renderer.SetStrokeColorHex(l.Color)
-	renderer.SetStrokeWidth(l.LineWidth)
-	end := l.P2
-	if toPoint != nil {
-		end = *toPoint
-	}
-	renderer.Line(l.P1.X, l.P1.Y, l.P1.Z, end.X, end.Y, end.Z)
-}
