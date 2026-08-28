@@ -89,7 +89,7 @@ func main() {
 		coneRot := mat4x4Rotate(0, coneRotY, 0)
 
 		boxPlanes := make([]PlaneArray, bodyCount)
-		for i := 0; i < bodyCount; i++ {
+		for i := range bodyCount {
 			b := &bodies[i]
 			vc := b.Solid.VertexCount
 			worldVerts := make([]Vec3, vc)
@@ -107,7 +107,7 @@ func main() {
 		coneR := coneLen * float32(math.Sin(float64(coneAngle)))
 		coneZ := coneLen * float32(math.Cos(float64(coneAngle)))
 
-		for i := 0; i < coneLines; i++ {
+		for i := range coneLines {
 			a := 2.0 * float32(math.Pi) * float32(i) / float32(coneLines)
 			end := vec3(
 				apex.X+float32(math.Cos(float64(a)))*coneR,
@@ -119,7 +119,7 @@ func main() {
 			endpoint := rotatedEnd
 			maxDist := rotatedEnd.Sub(apex).SquaredLength()
 
-			for j := 0; j < bodyCount; j++ {
+			for j := range bodyCount {
 				for k := 0; k < boxPlanes[j].Count; k++ {
 					var hit Vec3
 					if boxPlanes[j].Data[k].IntersectLine(apex, rotatedEnd, &hit) {
