@@ -29,12 +29,13 @@ void main() {
         base = uColor.rgb * brightness;
     }
 
-    // Flächige Schattierung: pro Pixel die Facetten-Normale aus den
-    // Kamera-Raum-Ableitungen rekonstruieren (funktioniert nur für
-    // Dreiecke; Linien/Points bleiben mit uLighted == 0 unbelichtet).
+    // Flächige Schattierung (Headlight): Licht kommt aus Kamerarichtung.
+    // Die Facetten-Normale wird pro Pixel aus den Kamera-Raum-Ableitungen
+    // rekonstruiert. Bewusst OHNE gl_FrontFacing-Flip, damit die Flächen
+    // schattiert bleiben (zur Kamera zeigende Flächen hell, wegdrehende
+    // dunkler) – statt alles gleichmäßig auszuleuchten.
     if (uLighted == 1) {
         vec3 n = normalize(cross(dFdx(vCamPos), dFdy(vCamPos)));
-        if (!gl_FrontFacing) n = -n;
 
         float diff = max(dot(n, normalize(uLightDir)), 0.0);
         base *= 0.25 + 0.75 * diff;

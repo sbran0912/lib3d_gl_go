@@ -149,6 +149,16 @@ func (v Vec3) Transform(m *Mat4x4) Vec3 {
 	)
 }
 
+// TransformDir transformiert nur die Rotation eines Vektors (ohne
+// Translation) – für Richtungen wie Licht-/Normalenvektoren.
+func (v Vec3) TransformDir(m *Mat4x4) Vec3 {
+	return vec3(
+		m.M[0]*v.X+m.M[4]*v.Y+m.M[8]*v.Z,
+		m.M[1]*v.X+m.M[5]*v.Y+m.M[9]*v.Z,
+		m.M[2]*v.X+m.M[6]*v.Y+m.M[10]*v.Z,
+	)
+}
+
 func mat4x4Identity() Mat4x4 {
 	return Mat4x4{[16]float32{
 		1, 0, 0, 0,
@@ -715,7 +725,7 @@ func (r *Renderer) Init(w, h int) bool {
 	gl.Uniform3f(r.locCenter, 0, 0, 0)
 	gl.Uniform1f(r.locRadius, 1)
 	gl.Uniform1i(r.locLighted, 0)
-	gl.Uniform3f(r.locLightDir, 0.5, 0.8, 0.3)
+	gl.Uniform3f(r.locLightDir, 0, 0, 1) // Headlight: Licht aus Kamerarichtung (View-Space)
 
 	identity := [16]float32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
 	gl.UniformMatrix4fv(r.locProjection, 1, false, &identity[0])
@@ -829,6 +839,13 @@ func (r *Renderer) SetFog(near, far, red, green, blue, alpha float32) {
 	gl.Uniform1f(r.locFogNear, near)
 	gl.Uniform1f(r.locFogFar, far)
 	gl.Uniform4f(r.locFogColor, red, green, blue, alpha)
+}
+
+// SetLightDirection setzt die Lichtrichtung in Kameraraum.
+// Muss pro Frame mit der aktuellen View-Matrix neu gesetzt werden,
+// damit die Beleuchtung unabhängig von der Kameraausrichtung bleibt.
+func (r *Renderer) SetLightDirection(x, y, z float32) {
+	gl.Uniform3f(r.locLightDir, x, y, z)
 }
 
 func (r *Renderer) Width() int      { return int(r.screenW) }

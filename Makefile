@@ -1,6 +1,6 @@
 # lib3d_gl – Makefile
 
-BINARY := lib3d_gl.app
+BINARY := demo.app
 
 .PHONY: dev build clean
 
